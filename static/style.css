@@ -125,6 +125,50 @@ button:disabled {
     font-weight: 500;
 }
 
+/* Theme multi-select */
+.theme-group {
+    margin-bottom: 1rem;
+}
+
+.theme-label {
+    display: block;
+    font-weight: 500;
+    color: #374151;
+    margin-bottom: 0.4rem;
+}
+
+#theme[multiple] {
+    height: 140px;
+    padding: 4px;
+    margin-bottom: 0.4rem;
+}
+
+.btn-select-all {
+    width: auto;
+    padding: 6px 14px;
+    margin-bottom: 0.5rem;
+    font-size: 0.85rem;
+    background: #475569;
+    font-weight: 500;
+}
+
+.btn-select-all:hover {
+    background: #334155;
+}
+
+/* Batch success message */
+.batch-success {
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #6ee7b7;
+    border-radius: 8px;
+    padding: 1rem 1.5rem;
+    text-align: center;
+    font-weight: 600;
+    width: 100%;
+    box-sizing: border-box;
+}
+
 /* 3D controls */
 .toggle-group {
     margin-bottom: 1rem;

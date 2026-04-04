@@ -13,6 +13,16 @@ function setMode(mode) {
     document.getElementById('country').required = (mode === 'city');
 }
 
+// Stadium selection → auto-fill lat/lon in 3D controls
+document.getElementById('stadium').addEventListener('input', function () {
+    const name = this.value;
+    if (window.STADIUMS && window.STADIUMS[name]) {
+        const s = window.STADIUMS[name];
+        document.getElementById('lat3d').value = s.lat;
+        document.getElementById('lon3d').value = s.lon;
+    }
+});
+
 // Radius slider
 document.getElementById('radius').addEventListener('input', e =>
     document.getElementById('radiusVal').textContent = Math.round(e.target.value / 1000)
@@ -37,6 +47,12 @@ document.getElementById('bearing3d').addEventListener('input', e =>
     document.getElementById('bearing3dVal').textContent = e.target.value + '°'
 );
 
+// Select All themes
+document.getElementById('selectAllThemes').addEventListener('click', () => {
+    const sel = document.getElementById('theme');
+    Array.from(sel.options).forEach(o => o.selected = true);
+});
+
 // Preview map instance
 let previewMap = null;
 
@@ -47,7 +63,23 @@ function get3DConfig() {
         zoom: parseFloat(document.getElementById('zoom3d').value),
         pitch: parseFloat(document.getElementById('pitch3d').value),
         bearing: parseFloat(document.getElementById('bearing3d').value),
-        overlaySize: document.getElementById('overlaySize').value
+        overlaySize: document.getElementById('overlaySize').value,
+        lightPreset: document.getElementById('lightPreset').value
+    };
+}
+
+function makeBasemapConfig(lightPreset) {
+    return {
+        lightPreset: lightPreset,
+        showPedestrianRoads: false,
+        showPlaceLabels: false,
+        showPointOfInterestLabels: false,
+        backgroundPointOfInterestLabels: "none",
+        showRoadLabels: false,
+        showTransitLabels: false,
+        showAdminBoundaries: false,
+        show3dBuildings: false,
+        showLandmarkIconLabels: false
     };
 }
 
@@ -69,20 +101,7 @@ document.getElementById('preview3dBtn').addEventListener('click', () => {
     previewMap = new mapboxgl.Map({
         container: 'mapbox-container',
         style: 'mapbox://styles/mapbox/standard',
-        config: {
-            basemap: {
-                lightPreset: "dusk",
-                showPedestrianRoads: false,
-                showPlaceLabels: false,
-                showPointOfInterestLabels: false,
-                backgroundPointOfInterestLabels: "none",
-                showRoadLabels: false,
-                showTransitLabels: false,
-                showAdminBoundaries: false,
-                show3dBuildings: false,
-                showLandmarkIconLabels: false
-            }
-        },
+        config: { basemap: makeBasemapConfig(cfg.lightPreset) },
         center: [cfg.lon, cfg.lat],
         zoom: cfg.zoom,
         bearing: cfg.bearing,
@@ -91,17 +110,17 @@ document.getElementById('preview3dBtn').addEventListener('click', () => {
     });
 
     previewMap.on('load', () => {
-        // Adjust sliders in real-time
-        ['zoom3d', 'pitch3d', 'bearing3d'].forEach(id => {
+        ['zoom3d', 'pitch3d', 'bearing3d', 'lightPreset'].forEach(id => {
             document.getElementById(id).addEventListener('input', () => {
                 const c = get3DConfig();
                 previewMap.jumpTo({ zoom: c.zoom, pitch: c.pitch, bearing: c.bearing });
+                previewMap.setConfigProperty('basemap', 'lightPreset', c.lightPreset);
             });
         });
     });
 });
 
-// Capture 3D map as base64 PNG
+// Capture 3D map as base64 PNG — stadium model on dark background only
 function capture3DMap() {
     return new Promise((resolve, reject) => {
         const cfg = get3DConfig();
@@ -111,27 +130,14 @@ function capture3DMap() {
         }
 
         const captureContainer = document.getElementById('mapbox-capture');
-        // Use larger canvas for high-res capture
         captureContainer.style.width = '1024px';
         captureContainer.style.height = '1024px';
+        captureContainer.style.background = '#050505';
 
         const captureMap = new mapboxgl.Map({
             container: 'mapbox-capture',
             style: 'mapbox://styles/mapbox/standard',
-            config: {
-                basemap: {
-                    lightPreset: "dusk",
-                    showPedestrianRoads: false,
-                    showPlaceLabels: false,
-                    showPointOfInterestLabels: false,
-                    backgroundPointOfInterestLabels: "none",
-                    showRoadLabels: false,
-                    showTransitLabels: false,
-                    showAdminBoundaries: false,
-                    show3dBuildings: false,
-                    showLandmarkIconLabels: false
-                }
-            },
+            config: { basemap: makeBasemapConfig(cfg.lightPreset) },
             center: [cfg.lon, cfg.lat],
             zoom: cfg.zoom,
             bearing: cfg.bearing,
@@ -140,8 +146,17 @@ function capture3DMap() {
             interactive: false
         });
 
+        captureMap.on('style.load', () => {
+            // Force background to near-black so only the 3D landmark is visible
+            try {
+                if (captureMap.getLayer('background')) {
+                    captureMap.setPaintProperty('background', 'background-color', '#050505');
+                    captureMap.setPaintProperty('background', 'background-opacity', 1);
+                }
+            } catch (e) { /* layer name may differ in Standard style */ }
+        });
+
         captureMap.on('idle', () => {
-            // Wait a bit for 3D models to fully render
             setTimeout(() => {
                 try {
                     const canvas = captureMap.getCanvas();
@@ -170,18 +185,28 @@ document.getElementById('mapForm').addEventListener('submit', async (e) => {
     const img = document.getElementById('resultImage');
     const link = document.getElementById('downloadLink');
     const err = document.getElementById('errorMsg');
+    const batchMsg = document.getElementById('batchMsg');
+
+    // Validate theme selection
+    const themes = Array.from(document.getElementById('theme').selectedOptions).map(o => o.value);
+    if (themes.length === 0) {
+        err.textContent = 'Please select at least one theme.';
+        return;
+    }
 
     btn.disabled = true;
     loader.classList.remove('hidden');
     img.classList.add('hidden');
     link.classList.add('hidden');
+    batchMsg.classList.add('hidden');
     err.textContent = '';
 
     try {
         const payload = {
-            theme: document.getElementById('theme').value,
+            themes,
             radius: document.getElementById('radius').value
         };
+
         if (currentMode === 'stadium') {
             payload.stadium = document.getElementById('stadium').value;
         } else {
@@ -200,10 +225,11 @@ document.getElementById('mapForm').addEventListener('submit', async (e) => {
                 lat: cfg.lat, lon: cfg.lon,
                 zoom: cfg.zoom, pitch: cfg.pitch, bearing: cfg.bearing
             };
-            loader.textContent = '🔄 Generating poster with 3D overlay...';
-        } else {
-            loader.textContent = '🔄 Generating... (Please wait)';
         }
+
+        loader.textContent = themes.length > 1
+            ? `🔄 Generating ${themes.length} posters...`
+            : '🔄 Generating poster...';
 
         const res = await fetch('/generate', {
             method: 'POST',
@@ -212,18 +238,24 @@ document.getElementById('mapForm').addEventListener('submit', async (e) => {
         });
         const data = await res.json();
 
+        loader.classList.add('hidden');
+
         if (data.success) {
-            img.src = `/posters/${data.filename}`;
-            img.classList.remove('hidden');
-            link.href = `/posters/${data.filename}`;
-            link.download = data.filename;
-            link.classList.remove('hidden');
-            loader.classList.add('hidden');
+            if (data.batch) {
+                batchMsg.textContent = `✅ ${data.count} poster${data.count !== 1 ? 's' : ''} generated (${data.themes.join(', ')})`;
+                batchMsg.classList.remove('hidden');
+            } else {
+                img.src = `/posters/${data.filename}`;
+                img.classList.remove('hidden');
+                link.href = `/posters/${data.filename}`;
+                link.download = data.filename;
+                link.classList.remove('hidden');
+            }
         } else {
             throw new Error(data.error);
         }
     } catch (e) {
-        err.textContent = e.message || "Connection error.";
+        err.textContent = e.message || 'Connection error.';
         loader.classList.add('hidden');
     } finally {
         btn.disabled = false;

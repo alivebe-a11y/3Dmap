@@ -33,11 +33,15 @@
                             </datalist>
                         </label>
                     </div>
-                    <label>Theme
-                        <select id="theme">
+
+                    <div class="theme-group">
+                        <span class="theme-label">Theme</span>
+                        <button type="button" id="selectAllThemes" class="btn-select-all">Select All</button>
+                        <select multiple id="theme" size="6">
                             {% for theme in themes %}<option value="{{ theme }}">{{ theme }}</option>{% endfor %}
                         </select>
-                    </label>
+                    </div>
+
                     <label>Zoom (<span id="radiusVal">15</span> km)
                         <input type="range" id="radius" min="1000" max="50000" step="1000" value="15000">
                     </label>
@@ -51,10 +55,18 @@
 
                     <div id="controls3d" class="controls-3d hidden">
                         <label>Latitude
-                            <input type="number" id="lat3d" step="0.00001" placeholder="e.g. 53.46178">
+                            <input type="number" id="lat3d" step="0.00001" placeholder="e.g. 53.46308">
                         </label>
                         <label>Longitude
-                            <input type="number" id="lon3d" step="0.00001" placeholder="e.g. -2.29157">
+                            <input type="number" id="lon3d" step="0.00001" placeholder="e.g. -2.29133">
+                        </label>
+                        <label>Lighting
+                            <select id="lightPreset">
+                                <option value="dawn">Dawn</option>
+                                <option value="day">Day</option>
+                                <option value="dusk" selected>Dusk</option>
+                                <option value="night">Night</option>
+                            </select>
                         </label>
                         <label>3D Zoom
                             <input type="range" id="zoom3d" min="14" max="19" step="0.1" value="16.91">
@@ -78,12 +90,13 @@
                         <button type="button" id="preview3dBtn" class="btn-preview">Preview 3D</button>
                     </div>
 
-                    <button type="submit" id="generateBtn">Generate Map</button>
+                    <button type="submit" id="generateBtn">Generate Poster</button>
                     <div id="errorMsg" class="error"></div>
                 </form>
             </div>
             <div class="card result-panel">
                 <div id="loader" class="hidden">🔄 Generating... (Please wait)</div>
+                <div id="batchMsg" class="batch-success hidden"></div>
                 <div id="preview3dContainer" class="hidden">
                     <p class="preview-label">3D Landmark Preview</p>
                     <div id="mapbox-container"></div>
@@ -95,9 +108,10 @@
     </div>
 
     <!-- Hidden offscreen map for high-res capture -->
-    <div id="mapbox-capture" style="position:absolute;left:-9999px;top:-9999px;width:1024px;height:1024px;"></div>
+    <div id="mapbox-capture" style="position:absolute;left:-9999px;top:-9999px;width:1024px;height:1024px;background:#050505;"></div>
 
     <script>window.MAPBOX_TOKEN = "{{ mapbox_token }}";</script>
+    <script>window.STADIUMS = {{ stadiums_json | safe }};</script>
     <script src="/static/script.js"></script>
 </body>
 
