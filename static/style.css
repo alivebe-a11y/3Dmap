@@ -8,7 +8,7 @@ body {
 
 .container {
     width: 100%;
-    max-width: 900px;
+    max-width: 960px;
 }
 
 h1 {
@@ -94,6 +94,93 @@ button:disabled {
     color: #dc2626;
     text-align: center;
     font-weight: 500;
+}
+
+/* 3D controls */
+.toggle-group {
+    margin-bottom: 1rem;
+}
+
+.toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-weight: 500;
+    color: #374151;
+}
+
+.toggle-label input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+    accent-color: #2563eb;
+}
+
+.controls-3d {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.controls-3d label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: #475569;
+    margin-bottom: 0.5rem;
+}
+
+.controls-3d input[type="range"] {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.controls-3d input[type="number"],
+.controls-3d select {
+    margin-bottom: 0.5rem;
+}
+
+.controls-3d span {
+    min-width: 3rem;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
+    color: #64748b;
+}
+
+.btn-preview {
+    background: #7c3aed;
+    margin-bottom: 0;
+}
+
+.btn-preview:hover {
+    background: #6d28d9;
+}
+
+/* 3D preview */
+#preview3dContainer {
+    width: 100%;
+    margin-bottom: 1rem;
+}
+
+.preview-label {
+    text-align: center;
+    font-weight: 600;
+    color: #475569;
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+}
+
+#mapbox-container {
+    width: 100%;
+    height: 300px;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 @media (max-width: 768px) {

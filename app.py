@@ -1,6 +1,8 @@
 import os
 import glob
 import subprocess
+import base64
+import uuid
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from cache_manager import get_cache_manager
 
@@ -10,7 +12,11 @@ cache = get_cache_manager()
 BASE_DIR = os.getcwd()
 POSTER_DIR = os.path.join(BASE_DIR, 'posters')
 THEME_DIR = os.path.join(BASE_DIR, 'themes')
+TEMP_DIR = os.path.join(BASE_DIR, 'temp_overlays')
 os.makedirs(POSTER_DIR, exist_ok=True)
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+MAPBOX_TOKEN = os.environ.get('MAPBOX_TOKEN', '')
 
 @app.route('/')
 def index():
@@ -19,9 +25,9 @@ def index():
     if os.path.exists(THEME_DIR):
         files = glob.glob(os.path.join(THEME_DIR, "*.json"))
         themes = [os.path.basename(f).replace(".json", "") for f in files]
-    if not themes: 
+    if not themes:
         themes = ["feature_based", "gradient_roads", "noir", "dark", "light"]
-    return render_template('index.html', themes=themes)
+    return render_template('index.html', themes=themes, mapbox_token=MAPBOX_TOKEN)
 
 @app.route('/generate', methods=['POST'])
 def generate():
@@ -33,15 +39,35 @@ def generate():
     
     if not city or not country:
         return jsonify({'success': False, 'error': 'City and Country required.'})
-    
+
+    # Handle 3D overlay if provided
+    overlay_3d = data.get('overlay_3d')
+    overlay_size = data.get('overlay_size', 'medium')
+    overlay_path = None
+
+    if overlay_3d:
+        try:
+            # Strip data URL prefix
+            if ',' in overlay_3d:
+                overlay_3d = overlay_3d.split(',', 1)[1]
+            img_bytes = base64.b64decode(overlay_3d)
+            overlay_path = os.path.join(TEMP_DIR, f"3d_{uuid.uuid4().hex}.png")
+            with open(overlay_path, 'wb') as f:
+                f.write(img_bytes)
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'Failed to process 3D overlay: {e}'})
+
     # Call the original script present in the clone
     cmd = [
-        "python", "create_map_poster.py", 
-        "--city", city, 
-        "--country", country, 
-        "--distance", radius, 
+        "python", "create_map_poster.py",
+        "--city", city,
+        "--country", country,
+        "--distance", radius,
         "--theme", theme
     ]
+
+    if overlay_path:
+        cmd.extend(["--overlay-3d", overlay_path, "--overlay-size", overlay_size])
     
     try:
         existing_files = set(glob.glob(os.path.join(POSTER_DIR, "*.png")))
@@ -64,6 +90,13 @@ def generate():
             })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+    finally:
+        # Clean up temp overlay file
+        if overlay_path and os.path.exists(overlay_path):
+            try:
+                os.remove(overlay_path)
+            except OSError:
+                pass
 
 @app.route('/posters/<path:filename>')
 def serve_poster(filename):

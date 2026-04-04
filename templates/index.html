@@ -6,6 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MapToPoster</title>
     <link rel="stylesheet" href="/static/style.css">
+    <script src='https://api.mapbox.com/mapbox-gl-js/v3.12.0/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v3.12.0/mapbox-gl.css' rel='stylesheet' />
 </head>
 
 <body>
@@ -24,17 +26,63 @@
                     <label>Zoom (<span id="radiusVal">15</span> km)
                         <input type="range" id="radius" min="1000" max="50000" step="1000" value="15000">
                     </label>
+
+                    <div class="toggle-group">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="enable3d">
+                            <span>Enable 3D Landmark Overlay</span>
+                        </label>
+                    </div>
+
+                    <div id="controls3d" class="controls-3d hidden">
+                        <label>Latitude
+                            <input type="number" id="lat3d" step="0.00001" placeholder="e.g. 53.46178">
+                        </label>
+                        <label>Longitude
+                            <input type="number" id="lon3d" step="0.00001" placeholder="e.g. -2.29157">
+                        </label>
+                        <label>3D Zoom
+                            <input type="range" id="zoom3d" min="14" max="19" step="0.1" value="16.91">
+                            <span id="zoom3dVal">16.9</span>
+                        </label>
+                        <label>Pitch
+                            <input type="range" id="pitch3d" min="0" max="85" step="1" value="49">
+                            <span id="pitch3dVal">49°</span>
+                        </label>
+                        <label>Bearing
+                            <input type="range" id="bearing3d" min="-180" max="180" step="1" value="0">
+                            <span id="bearing3dVal">0°</span>
+                        </label>
+                        <label>Overlay Size
+                            <select id="overlaySize">
+                                <option value="small">Small (20%)</option>
+                                <option value="medium" selected>Medium (35%)</option>
+                                <option value="large">Large (50%)</option>
+                            </select>
+                        </label>
+                        <button type="button" id="preview3dBtn" class="btn-preview">Preview 3D</button>
+                    </div>
+
                     <button type="submit" id="generateBtn">Generate Map</button>
                     <div id="errorMsg" class="error"></div>
                 </form>
             </div>
             <div class="card result-panel">
                 <div id="loader" class="hidden">🔄 Generating... (Please wait)</div>
+                <div id="preview3dContainer" class="hidden">
+                    <p class="preview-label">3D Landmark Preview</p>
+                    <div id="mapbox-container"></div>
+                </div>
                 <img id="resultImage" class="hidden">
                 <a id="downloadLink" href="#" class="btn-download hidden">⬇️ Download PNG</a>
             </div>
         </div>
     </div>
+
+    <!-- Hidden offscreen map for high-res capture -->
+    <div id="mapbox-capture" style="position:absolute;left:-9999px;top:-9999px;width:1024px;height:1024px;"></div>
+
+    <script>window.MAPBOX_TOKEN = "{{ mapbox_token }}";</script>
     <script src="/static/script.js"></script>
 </body>
 

@@ -16,7 +16,7 @@ import argparse
 
 # Stadium features
 from stadium_data import find_stadium, get_stadium_coords, list_stadiums
-from image_overlay import add_badge_overlay, add_stadium_marker
+from image_overlay import add_badge_overlay, add_stadium_marker, add_3d_overlay
 
 THEMES_DIR = "themes"
 FONTS_DIR = "fonts"
@@ -214,9 +214,10 @@ def create_gradient_fade(ax, THEME, height_fraction=0.15):
               aspect='auto', cmap=cmap_bottom, alpha=0.6,
               transform=ax.transAxes, zorder=10)
 
-def create_poster(city, country, theme_name='feature_based', distance=29000, 
+def create_poster(city, country, theme_name='feature_based', distance=29000,
                  width=24, height=34, dpi=500, attribution='BlueBearLabs',
-                 stadium=None, badge_path=None, coords=None, marker_style='star'):
+                 stadium=None, badge_path=None, coords=None, marker_style='star',
+                 overlay_3d=None, overlay_size='medium'):
     """
     Create a map poster with caching support for OSM data.
     
@@ -233,6 +234,8 @@ def create_poster(city, country, theme_name='feature_based', distance=29000,
         badge_path: Path to team badge PNG (optional)
         coords: Manual coordinates as (lat, lon) tuple (optional)
         marker_style: Stadium marker style - 'star', 'pin', 'circle', 'crosshair', or None
+        overlay_3d: Path to a 3D landmark capture PNG to overlay centered on poster
+        overlay_size: Size of the 3D overlay - 'small', 'medium', or 'large'
     """
     stadium_data = None
     display_name = city  # For output filename
@@ -431,7 +434,12 @@ def create_poster(city, country, theme_name='feature_based', distance=29000,
         )
     elif stadium_data and marker_style and badge_path:
         print(f"ℹ️  Skipping marker - badge provided instead")
-    
+
+    # Add 3D landmark overlay if provided
+    if overlay_3d and os.path.exists(overlay_3d):
+        print(f"🏛️  Adding 3D landmark overlay ({overlay_size})...")
+        add_3d_overlay(ax, overlay_3d, size=overlay_size, alpha=0.95)
+
     # Add gradient fades
     create_gradient_fade(ax, THEME)
     
@@ -583,10 +591,18 @@ Examples:
                        help='Path to team badge/logo PNG file for overlay')
     parser.add_argument('--coords', type=str,
                        help='Manual coordinates as "lat,lon" (e.g., "51.5074,-0.1278")')
-    parser.add_argument('--marker', type=str, 
+    parser.add_argument('--marker', type=str,
                        choices=['star', 'pin', 'circle', 'crosshair', 'none'],
                        default='star',
                        help='Stadium marker style (default: star, use "none" for no marker)')
+
+    # 3D overlay arguments
+    parser.add_argument('--overlay-3d', type=str,
+                       help='Path to a 3D landmark capture PNG to overlay on the poster')
+    parser.add_argument('--overlay-size', type=str,
+                       choices=['small', 'medium', 'large'],
+                       default='medium',
+                       help='Size of the 3D overlay (default: medium)')
     
     # Listing options
     parser.add_argument('--list-themes', action='store_true',
@@ -691,7 +707,9 @@ Examples:
         stadium=args.stadium,
         badge_path=args.badge,
         coords=coords,
-        marker_style=marker_style
+        marker_style=marker_style,
+        overlay_3d=args.overlay_3d,
+        overlay_size=args.overlay_size
     )
 
 if __name__ == "__main__":

@@ -193,6 +193,97 @@ def calculate_axes_position(lat, lon, map_bounds):
     return (x, y)
 
 
+def add_3d_overlay(ax, overlay_path, size='medium', alpha=0.95):
+    """
+    Add a 3D landmark capture as a centered overlay on the poster.
+
+    The overlay is rendered as a circular vignette with soft edges,
+    placed at the center of the map.
+
+    Args:
+        ax: Matplotlib axes object
+        overlay_path: Path to the 3D capture PNG file
+        size: 'small' (20%), 'medium' (35%), or 'large' (50%) of poster width
+        alpha: Overall transparency (0.0-1.0)
+
+    Returns:
+        AnnotationBbox object or None
+    """
+    if not os.path.exists(overlay_path):
+        print(f"⚠️  3D overlay file not found: {overlay_path}")
+        return None
+
+    size_map = {'small': 0.20, 'medium': 0.35, 'large': 0.50}
+    size_fraction = size_map.get(size, 0.35)
+
+    try:
+        img = Image.open(overlay_path).convert('RGBA')
+
+        # Crop to square from center
+        w, h = img.size
+        side = min(w, h)
+        left = (w - side) // 2
+        top = (h - side) // 2
+        img = img.crop((left, top, left + side, top + side))
+
+        # Create circular vignette mask with soft edges
+        mask_size = img.size[0]
+        mask = Image.new('L', (mask_size, mask_size), 0)
+        draw = ImageDraw.Draw(mask)
+
+        # Draw concentric circles for soft edge fade
+        center = mask_size // 2
+        radius = center
+        # Inner solid region (80% of radius)
+        inner_radius = int(radius * 0.80)
+        draw.ellipse(
+            (center - inner_radius, center - inner_radius,
+             center + inner_radius, center + inner_radius),
+            fill=255
+        )
+
+        # Fade region from inner to outer edge
+        fade_steps = radius - inner_radius
+        for i in range(fade_steps):
+            r = inner_radius + i
+            fade_alpha = int(255 * (1.0 - (i / fade_steps)))
+            draw.ellipse(
+                (center - r, center - r, center + r, center + r),
+                outline=fade_alpha
+            )
+
+        # Apply mask as alpha channel, combined with existing alpha
+        img_array = np.array(img)
+        mask_array = np.array(mask)
+        # Blend: keep original alpha where mask is 255, fade where mask fades
+        img_array[:, :, 3] = np.minimum(
+            img_array[:, :, 3],
+            (mask_array * alpha).astype(np.uint8)
+        )
+        img = Image.fromarray(img_array)
+
+        # Scale for display
+        display_px = int(size_fraction * 1000)
+        img = img.resize((display_px, display_px), Image.Resampling.LANCZOS)
+
+        imagebox = OffsetImage(img, zoom=1.0)
+        ab = AnnotationBbox(
+            imagebox,
+            (0.5, 0.55),  # Slightly above center for visual balance
+            xycoords='axes fraction',
+            frameon=False,
+            box_alignment=(0.5, 0.5),
+            zorder=8  # Below text (11) and gradient (10), above streets
+        )
+        ax.add_artist(ab)
+
+        return ab
+
+    except Exception as e:
+        print(f"✗ Error adding 3D overlay: {e}")
+        return None
+
+
 def create_circular_badge_mask(image_path, output_path=None):
     """
     Create a circular mask for a badge image
