@@ -176,9 +176,14 @@ document.getElementById('mapForm').addEventListener('submit', async (e) => {
         // If 3D is enabled, capture the map first
         if (document.getElementById('enable3d').checked) {
             loader.textContent = '🔄 Capturing 3D landmark...';
+            const cfg = get3DConfig();
             const dataURL = await capture3DMap();
             payload.overlay_3d = dataURL;
-            payload.overlay_size = document.getElementById('overlaySize').value;
+            payload.overlay_size = cfg.overlaySize;
+            payload.overlay_config = {
+                lat: cfg.lat, lon: cfg.lon,
+                zoom: cfg.zoom, pitch: cfg.pitch, bearing: cfg.bearing
+            };
             loader.textContent = '🔄 Generating poster with 3D overlay...';
         } else {
             loader.textContent = '🔄 Generating... (Please wait)';

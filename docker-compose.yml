@@ -9,6 +9,7 @@ services:
       - ./cache:/app/cache
       - ./badges:/app/badges
       - ./stadium_data.py:/app/stadium_data.py
+      - ./overlays_cache:/app/overlays_cache
     environment:
       - MAPBOX_TOKEN=${MAPBOX_TOKEN}
     restart: unless-stopped

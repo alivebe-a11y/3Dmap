@@ -2,7 +2,6 @@ import os
 import glob
 import subprocess
 import base64
-import uuid
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from cache_manager import get_cache_manager
 
@@ -12,9 +11,9 @@ cache = get_cache_manager()
 BASE_DIR = os.getcwd()
 POSTER_DIR = os.path.join(BASE_DIR, 'posters')
 THEME_DIR = os.path.join(BASE_DIR, 'themes')
-TEMP_DIR = os.path.join(BASE_DIR, 'temp_overlays')
+OVERLAY_CACHE_DIR = os.path.join(BASE_DIR, 'overlays_cache')
 os.makedirs(POSTER_DIR, exist_ok=True)
-os.makedirs(TEMP_DIR, exist_ok=True)
+os.makedirs(OVERLAY_CACHE_DIR, exist_ok=True)
 
 MAPBOX_TOKEN = os.environ.get('MAPBOX_TOKEN', '')
 
@@ -43,17 +42,30 @@ def generate():
     # Handle 3D overlay if provided
     overlay_3d = data.get('overlay_3d')
     overlay_size = data.get('overlay_size', 'medium')
+    overlay_config = data.get('overlay_config', {})
     overlay_path = None
 
     if overlay_3d:
         try:
-            # Strip data URL prefix
-            if ',' in overlay_3d:
-                overlay_3d = overlay_3d.split(',', 1)[1]
-            img_bytes = base64.b64decode(overlay_3d)
-            overlay_path = os.path.join(TEMP_DIR, f"3d_{uuid.uuid4().hex}.png")
-            with open(overlay_path, 'wb') as f:
-                f.write(img_bytes)
+            # Build deterministic cache filename from map view config
+            lat = round(float(overlay_config.get('lat', 0)), 5)
+            lon = round(float(overlay_config.get('lon', 0)), 5)
+            zoom = round(float(overlay_config.get('zoom', 0)), 1)
+            pitch = int(overlay_config.get('pitch', 0))
+            bearing = int(overlay_config.get('bearing', 0))
+            cache_name = f"overlay_{lat}_{lon}_z{zoom}_p{pitch}_b{bearing}.png"
+            overlay_path = os.path.join(OVERLAY_CACHE_DIR, cache_name)
+
+            # Only decode and save if not already cached
+            if not os.path.exists(overlay_path):
+                if ',' in overlay_3d:
+                    overlay_3d = overlay_3d.split(',', 1)[1]
+                img_bytes = base64.b64decode(overlay_3d)
+                with open(overlay_path, 'wb') as f:
+                    f.write(img_bytes)
+                print(f"3D overlay cached: {cache_name}")
+            else:
+                print(f"3D overlay cache hit: {cache_name}")
         except Exception as e:
             return jsonify({'success': False, 'error': f'Failed to process 3D overlay: {e}'})
 
@@ -90,13 +102,6 @@ def generate():
             })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
-    finally:
-        # Clean up temp overlay file
-        if overlay_path and os.path.exists(overlay_path):
-            try:
-                os.remove(overlay_path)
-            except OSError:
-                pass
 
 @app.route('/posters/<path:filename>')
 def serve_poster(filename):
