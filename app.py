@@ -26,18 +26,25 @@ def index():
         themes = [os.path.basename(f).replace(".json", "") for f in files]
     if not themes:
         themes = ["feature_based", "gradient_roads", "noir", "dark", "light"]
-    return render_template('index.html', themes=themes, mapbox_token=MAPBOX_TOKEN)
+    # Stadium names for autocomplete
+    try:
+        from stadium_data import list_stadiums
+        stadiums = [s['name'] for s in list_stadiums()]
+    except Exception:
+        stadiums = []
+    return render_template('index.html', themes=themes, mapbox_token=MAPBOX_TOKEN, stadiums=stadiums)
 
 @app.route('/generate', methods=['POST'])
 def generate():
     data = request.json
-    city = data.get('city')
-    country = data.get('country')
+    city = data.get('city', '')
+    country = data.get('country', '')
+    stadium = data.get('stadium', '')
     theme = data.get('theme')
     radius = str(data.get('radius', 15000))
-    
-    if not city or not country:
-        return jsonify({'success': False, 'error': 'City and Country required.'})
+
+    if not stadium and (not city or not country):
+        return jsonify({'success': False, 'error': 'Provide a stadium name, or both city and country.'})
 
     # Handle 3D overlay if provided
     overlay_3d = data.get('overlay_3d')
@@ -70,13 +77,11 @@ def generate():
             return jsonify({'success': False, 'error': f'Failed to process 3D overlay: {e}'})
 
     # Call the original script present in the clone
-    cmd = [
-        "python", "create_map_poster.py",
-        "--city", city,
-        "--country", country,
-        "--distance", radius,
-        "--theme", theme
-    ]
+    cmd = ["python", "create_map_poster.py", "--theme", theme, "--distance", radius]
+    if stadium:
+        cmd.extend(["--stadium", stadium])
+    else:
+        cmd.extend(["--city", city, "--country", country])
 
     if overlay_path:
         cmd.extend(["--overlay-3d", overlay_path, "--overlay-size", overlay_size])

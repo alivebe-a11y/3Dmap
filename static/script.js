@@ -1,6 +1,18 @@
 // Mapbox token (injected by Flask from MAPBOX_TOKEN env var)
 mapboxgl.accessToken = window.MAPBOX_TOKEN;
 
+// Mode switching: city vs stadium
+let currentMode = 'city';
+function setMode(mode) {
+    currentMode = mode;
+    document.getElementById('cityFields').classList.toggle('hidden', mode !== 'city');
+    document.getElementById('stadiumFields').classList.toggle('hidden', mode !== 'stadium');
+    document.getElementById('tabCity').classList.toggle('active', mode === 'city');
+    document.getElementById('tabStadium').classList.toggle('active', mode === 'stadium');
+    document.getElementById('city').required = (mode === 'city');
+    document.getElementById('country').required = (mode === 'city');
+}
+
 // Radius slider
 document.getElementById('radius').addEventListener('input', e =>
     document.getElementById('radiusVal').textContent = Math.round(e.target.value / 1000)
@@ -167,11 +179,15 @@ document.getElementById('mapForm').addEventListener('submit', async (e) => {
 
     try {
         const payload = {
-            city: document.getElementById('city').value,
-            country: document.getElementById('country').value,
             theme: document.getElementById('theme').value,
             radius: document.getElementById('radius').value
         };
+        if (currentMode === 'stadium') {
+            payload.stadium = document.getElementById('stadium').value;
+        } else {
+            payload.city = document.getElementById('city').value;
+            payload.country = document.getElementById('country').value;
+        }
 
         // If 3D is enabled, capture the map first
         if (document.getElementById('enable3d').checked) {

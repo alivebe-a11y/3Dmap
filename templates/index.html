@@ -16,8 +16,23 @@
         <div class="main-content">
             <div class="card control-panel">
                 <form id="mapForm">
-                    <label>City <input type="text" id="city" placeholder="e.g. Port Louis" required></label>
-                    <label>Country <input type="text" id="country" placeholder="e.g. Mauritius" required></label>
+                    <div class="mode-tabs">
+                        <button type="button" class="tab-btn active" id="tabCity" onclick="setMode('city')">City</button>
+                        <button type="button" class="tab-btn" id="tabStadium" onclick="setMode('stadium')">Stadium</button>
+                    </div>
+
+                    <div id="cityFields">
+                        <label>City <input type="text" id="city" placeholder="e.g. Manchester"></label>
+                        <label>Country <input type="text" id="country" placeholder="e.g. UK"></label>
+                    </div>
+                    <div id="stadiumFields" class="hidden">
+                        <label>Stadium
+                            <input type="text" id="stadium" list="stadiumList" placeholder="e.g. Old Trafford">
+                            <datalist id="stadiumList">
+                                {% for s in stadiums %}<option value="{{ s }}">{% endfor %}
+                            </datalist>
+                        </label>
+                    </div>
                     <label>Theme
                         <select id="theme">
                             {% for theme in themes %}<option value="{{ theme }}">{{ theme }}</option>{% endfor %}
