@@ -3,7 +3,6 @@ FROM python:3.11-slim AS builder
 
 # 1. Build tools
 RUN apt-get update && apt-get install -y \
-    git \
     build-essential \
     libspatialindex-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -14,10 +13,10 @@ WORKDIR /app
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# 3. Ultra-light clone (without history) - FIXED: space before dot
-RUN git clone --depth 1 https://github.com/alivebe-a11y/maptoposter-dock.git .
+# 3. Copy repo code from build context (checked out by CI)
+COPY . .
 
-# 4. Install deps (Works well with Py 3.11)
+# 4. Install deps
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 5. Install additional dependencies for caching and stadium features

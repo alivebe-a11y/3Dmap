@@ -1,15 +1,12 @@
 services:
   maptoposter:
-    image: ghcr.io/alivebe-a11y/maptoposter-dock:latest
+    image: ghcr.io/alivebe-a11y/3dmap:latest
     container_name: maptoposter
     ports:
       - "5025:5025"
     volumes:
-      # Local directory to retrieve generated PNGs
       - ./posters:/app/posters
-
-      # ADD THESE TWO LINES:
       - ./cache:/app/cache
-      - ./cache_manager.py:/app/cache_manager.py
-      
+    environment:
+      - MAPBOX_TOKEN=${MAPBOX_TOKEN}
     restart: unless-stopped
