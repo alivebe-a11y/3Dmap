@@ -12,6 +12,13 @@ services:
       - ./overlays_cache:/app/overlays_cache
     environment:
       - MAPBOX_TOKEN=${MAPBOX_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     restart: unless-stopped
 
 networks: {}
