@@ -219,14 +219,18 @@ def add_3d_overlay(ax, overlay_path, size='medium', alpha=0.95):
     try:
         img = Image.open(overlay_path).convert('RGBA')
 
-        # Remove background using rembg for clean transparent cutout
-        try:
-            from rembg import remove as rembg_remove, new_session
-            session = new_session('isnet-general-use')
-            img = rembg_remove(img, session=session)
-            print("✓ rembg background removal applied (isnet-general-use)")
-        except Exception as e:
-            print(f"⚠️  rembg not available, skipping: {e}")
+        # Remove background by colour-distance masking against #050505
+        # Pixel-perfect for controlled dark backgrounds — no ML guessing
+        img_array = np.array(img).astype(float)
+        bg = np.array([5.0, 5.0, 5.0])  # #050505
+        dist = np.sqrt(np.sum((img_array[:, :, :3] - bg) ** 2, axis=2))
+        # Pixels within threshold of background become transparent
+        # Soft edge: linear ramp from threshold-10 to threshold+10
+        threshold = 40
+        alpha_mask = np.clip((dist - (threshold - 10)) / 20.0, 0.0, 1.0)
+        img_array[:, :, 3] = (alpha_mask * 255).astype(np.uint8)
+        img = Image.fromarray(img_array.astype(np.uint8))
+        print(f"✓ Colour-diff background removal applied (threshold={threshold})")
 
         # Crop to square from center
         w, h = img.size
