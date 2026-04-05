@@ -130,8 +130,8 @@ function capture3DMap() {
         }
 
         const captureContainer = document.getElementById('mapbox-capture');
-        captureContainer.style.width = '1024px';
-        captureContainer.style.height = '1024px';
+        captureContainer.style.width = '4096px';
+        captureContainer.style.height = '4096px';
         captureContainer.style.background = '#050505';
 
         const captureMap = new mapboxgl.Map({
@@ -209,6 +209,7 @@ document.getElementById('mapForm').addEventListener('submit', async (e) => {
 
         if (currentMode === 'stadium') {
             payload.stadium = document.getElementById('stadium').value;
+            payload.badge = document.getElementById('badge').value;
         } else {
             payload.city = document.getElementById('city').value;
             payload.country = document.getElementById('country').value;

@@ -32,6 +32,12 @@
                                 {% for s in stadiums %}<option value="{{ s }}">{% endfor %}
                             </datalist>
                         </label>
+                        <label>Badge
+                            <select id="badge">
+                                <option value="">No badge</option>
+                                {% for b in badges %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
+                            </select>
+                        </label>
                     </div>
 
                     <div class="theme-group">
@@ -108,7 +114,7 @@
     </div>
 
     <!-- Hidden offscreen map for high-res capture -->
-    <div id="mapbox-capture" style="position:absolute;left:-9999px;top:-9999px;width:1024px;height:1024px;background:#050505;"></div>
+    <div id="mapbox-capture" style="position:absolute;left:-9999px;top:-9999px;width:4096px;height:4096px;background:#050505;"></div>
 
     <script>window.MAPBOX_TOKEN = "{{ mapbox_token }}";</script>
     <script>window.STADIUMS = {{ stadiums_json | safe }};</script>

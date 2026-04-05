@@ -39,7 +39,14 @@ def index():
     except Exception:
         stadiums = []
         stadiums_json = '{}'
-    return render_template('index.html', themes=themes, mapbox_token=MAPBOX_TOKEN, stadiums=stadiums, stadiums_json=stadiums_json)
+    # List badge files from badges directory
+    badges_dir = os.path.join(BASE_DIR, 'badges')
+    badges = []
+    if os.path.exists(badges_dir):
+        for f in sorted(os.listdir(badges_dir)):
+            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                badges.append(f)
+    return render_template('index.html', themes=themes, mapbox_token=MAPBOX_TOKEN, stadiums=stadiums, stadiums_json=stadiums_json, badges=badges)
 
 @app.route('/generate', methods=['POST'])
 def generate():
@@ -47,6 +54,7 @@ def generate():
     city = data.get('city', '')
     country = data.get('country', '')
     stadium = data.get('stadium', '')
+    badge = data.get('badge', '')
 
     # Accept themes as array (new) or single theme string (legacy)
     themes = data.get('themes', [])
@@ -103,6 +111,10 @@ def generate():
                 cmd.extend(["--city", city, "--country", country])
             if overlay_path:
                 cmd.extend(["--overlay-3d", overlay_path, "--overlay-size", overlay_size])
+            if badge:
+                badge_path = os.path.join(BASE_DIR, 'badges', badge)
+                if os.path.exists(badge_path):
+                    cmd.extend(["--badge", badge_path])
             subprocess.run(cmd, check=True, timeout=600)
             current_files = set(glob.glob(os.path.join(POSTER_DIR, "*.png")))
             new_files = list(current_files - existing_files)

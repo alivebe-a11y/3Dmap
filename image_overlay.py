@@ -219,6 +219,14 @@ def add_3d_overlay(ax, overlay_path, size='medium', alpha=0.95):
     try:
         img = Image.open(overlay_path).convert('RGBA')
 
+        # Remove background using rembg for clean transparent cutout
+        try:
+            from rembg import remove as rembg_remove
+            img = rembg_remove(img)
+            print("✓ rembg background removal applied")
+        except Exception as e:
+            print(f"⚠️  rembg not available, skipping: {e}")
+
         # Crop to square from center
         w, h = img.size
         side = min(w, h)
