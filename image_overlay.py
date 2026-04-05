@@ -221,9 +221,10 @@ def add_3d_overlay(ax, overlay_path, size='medium', alpha=0.95):
 
         # Remove background using rembg for clean transparent cutout
         try:
-            from rembg import remove as rembg_remove
-            img = rembg_remove(img)
-            print("✓ rembg background removal applied")
+            from rembg import remove as rembg_remove, new_session
+            session = new_session('isnet-general-use')
+            img = rembg_remove(img, session=session)
+            print("✓ rembg background removal applied (isnet-general-use)")
         except Exception as e:
             print(f"⚠️  rembg not available, skipping: {e}")
 
