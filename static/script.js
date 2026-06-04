@@ -68,18 +68,20 @@ function get3DConfig() {
     };
 }
 
+// Only valid Mapbox Standard v3 config properties are used here. Earlier versions
+// of this list included keys (showPedestrianRoads, show3dBuildings, showAdminBoundaries,
+// showLandmarkIconLabels, backgroundPointOfInterestLabels) that Standard silently
+// ignores — so labels leaked into captures and 3D objects were never actually
+// controlled. We explicitly hide all labels and KEEP show3dObjects on so the 3D
+// landmark we want to capture actually renders.
 function makeBasemapConfig(lightPreset) {
     return {
         lightPreset: lightPreset,
-        showPedestrianRoads: false,
         showPlaceLabels: false,
         showPointOfInterestLabels: false,
-        backgroundPointOfInterestLabels: "none",
         showRoadLabels: false,
         showTransitLabels: false,
-        showAdminBoundaries: false,
-        show3dBuildings: false,
-        showLandmarkIconLabels: false
+        show3dObjects: true
     };
 }
 
@@ -156,24 +158,37 @@ function capture3DMap() {
             } catch (e) { /* layer name may differ in Standard style */ }
         });
 
+        let settled = false;
+        const finish = (fn, arg) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(hardTimeout);
+            try { captureMap.remove(); } catch (e) { /* already removed */ }
+            fn(arg);
+        };
+
+        const doCapture = () => {
+            try {
+                const canvas = captureMap.getCanvas();
+                const dataURL = canvas.toDataURL('image/png');
+                finish(resolve, dataURL);
+            } catch (err) {
+                finish(reject, err);
+            }
+        };
+
         captureMap.on('idle', () => {
-            setTimeout(() => {
-                try {
-                    const canvas = captureMap.getCanvas();
-                    const dataURL = canvas.toDataURL('image/png');
-                    captureMap.remove();
-                    resolve(dataURL);
-                } catch (err) {
-                    captureMap.remove();
-                    reject(err);
-                }
-            }, 2000);
+            // Give 3D geometry a moment to settle, then capture
+            setTimeout(doCapture, 2000);
         });
 
         captureMap.on('error', (err) => {
-            captureMap.remove();
-            reject(err);
+            finish(reject, err);
         });
+
+        // Hard fallback: if 'idle' never fires (partial style failure that emits no
+        // 'error'), capture whatever has rendered so the promise can't hang forever.
+        const hardTimeout = setTimeout(doCapture, 15000);
     });
 }
 
@@ -224,7 +239,8 @@ document.getElementById('mapForm').addEventListener('submit', async (e) => {
             payload.overlay_size = cfg.overlaySize;
             payload.overlay_config = {
                 lat: cfg.lat, lon: cfg.lon,
-                zoom: cfg.zoom, pitch: cfg.pitch, bearing: cfg.bearing
+                zoom: cfg.zoom, pitch: cfg.pitch, bearing: cfg.bearing,
+                lightPreset: cfg.lightPreset
             };
         }
 

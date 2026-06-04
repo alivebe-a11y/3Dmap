@@ -491,7 +491,10 @@ def create_poster(city, country, theme_name='feature_based', distance=29000,
                 zorder=11)
         
         # Coordinates
-        coord_text = f"{latitude:.4f}°N  {abs(longitude):.4f}°{'E' if longitude >= 0 else 'W'}"
+        coord_text = (
+            f"{abs(latitude):.4f}°{'N' if latitude >= 0 else 'S'}  "
+            f"{abs(longitude):.4f}°{'E' if longitude >= 0 else 'W'}"
+        )
         ax.text(0.5, 0.07, coord_text,
                 fontproperties=font_light,
                 fontsize=27,

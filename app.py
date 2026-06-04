@@ -83,7 +83,8 @@ def generate():
             zoom = round(float(overlay_config.get('zoom', 0)), 1)
             pitch = int(overlay_config.get('pitch', 0))
             bearing = int(overlay_config.get('bearing', 0))
-            cache_name = f"overlay_{lat}_{lon}_z{zoom}_p{pitch}_b{bearing}.png"
+            light = overlay_config.get('lightPreset', 'dusk')
+            cache_name = f"overlay_{lat}_{lon}_z{zoom}_p{pitch}_b{bearing}_{light}.png"
             overlay_path = os.path.join(OVERLAY_CACHE_DIR, cache_name)
 
             if not os.path.exists(overlay_path):
