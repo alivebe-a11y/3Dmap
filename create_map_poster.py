@@ -294,10 +294,17 @@ def create_poster(city, country, theme_name='feature_based', distance=29000,
         return None
     
     point = (latitude, longitude)
-    
+
+    # The poster is taller than it is wide (e.g. 24x34): `distance` is the
+    # horizontal half-extent, so fetch enough OSM data to also fill the
+    # taller vertical extent. The view is cropped to the exact poster
+    # aspect after plotting.
+    aspect = height / width
+    fetch_dist = int(distance * max(1.0, aspect))
+
     # Check OSM cache first
     print(f"⊙ Checking OSM data cache...")
-    cached_osm = cache.get_osm_data(latitude, longitude, distance, 'all')
+    cached_osm = cache.get_osm_data(latitude, longitude, fetch_dist, 'all')
     
     if cached_osm is not None:
         print(f"✓ Using cached OSM data")
@@ -314,7 +321,7 @@ def create_poster(city, country, theme_name='feature_based', distance=29000,
         try:
             G = ox.graph_from_point(
                 point, 
-                dist=distance, 
+                dist=fetch_dist, 
                 dist_type='bbox',
                 network_type='all',
                 truncate_by_edge=True
@@ -330,7 +337,7 @@ def create_poster(city, country, theme_name='feature_based', distance=29000,
             water = ox.features_from_point(
                 point,
                 tags={'natural': 'water'},
-                dist=distance
+                dist=fetch_dist
             )
             if water is not None and not water.empty:
                 print(f"   ✓ Water: {len(water)} features")
@@ -347,7 +354,7 @@ def create_poster(city, country, theme_name='feature_based', distance=29000,
             parks = ox.features_from_point(
                 point,
                 tags={'leisure': 'park'},
-                dist=distance
+                dist=fetch_dist
             )
             if parks is not None and not parks.empty:
                 print(f"   ✓ Parks: {len(parks)} features")
@@ -360,7 +367,7 @@ def create_poster(city, country, theme_name='feature_based', distance=29000,
         
         # Cache the OSM data for next time
         print(f"\n✓ Caching OSM data for future use...")
-        cache.set_osm_data(latitude, longitude, distance, 'all', G, water, parks)
+        cache.set_osm_data(latitude, longitude, fetch_dist, 'all', G, water, parks)
     
     if G is None:
         print("✗ No graph data available. Cannot create poster.")
@@ -371,6 +378,10 @@ def create_poster(city, country, theme_name='feature_based', distance=29000,
     fig, ax = plt.subplots(figsize=(width, height), dpi=dpi)
     fig.patch.set_facecolor(THEME['bg'])
     ax.set_facecolor(THEME['bg'])
+    # Full-bleed: axes cover the whole figure so the saved PNG is exactly
+    # width x height inches at the requested DPI (print shops need the
+    # exact aspect ratio; bbox_inches='tight' used to crop it per-poster).
+    ax.set_position([0, 0, 1, 1])
     
     # Plot water features (if any)
     if water is not None and not water.empty:
@@ -399,7 +410,18 @@ def create_poster(city, country, theme_name='feature_based', distance=29000,
         show=False,
         close=False
     )
-    
+
+    # Crop the view to a ground window matching the poster aspect exactly:
+    # `distance` metres of half-width and distance * (height/width) of
+    # half-height. With the full-bleed axes above, this gives an
+    # undistorted map at a uniform metres-per-inch scale in both axes.
+    half_h_m = distance * aspect
+    dlat = half_h_m / 111320.0
+    dlon = distance / (111320.0 * max(0.01, float(np.cos(np.radians(latitude)))))
+    ax.set_xlim(longitude - dlon, longitude + dlon)
+    ax.set_ylim(latitude - dlat, latitude + dlat)
+    ax.set_aspect('auto')
+
     # Add badge overlay if provided (BEFORE gradient fades so it's visible)
     if badge_path and os.path.exists(badge_path):
         print(f"🎭 Adding badge overlay...")
@@ -527,13 +549,14 @@ def create_poster(city, country, theme_name='feature_based', distance=29000,
     )
     print(f"💾 Saving to {output_file}...")
     
+    # No bbox_inches='tight' — that cropped the output to the drawn content,
+    # so the file was never actually width x height. Full-bleed axes + plain
+    # savefig produce exactly (width*dpi) x (height*dpi) pixels.
     plt.savefig(
         output_file,
         dpi=dpi,
-        bbox_inches='tight',
         facecolor=THEME['bg'],
-        edgecolor='none',
-        pad_inches=0.1
+        edgecolor='none'
     )
     plt.close()
     

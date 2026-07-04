@@ -68,24 +68,62 @@ function get3DConfig() {
     };
 }
 
-// Only valid Mapbox Standard v3 config properties are used here. Earlier versions
-// of this list included keys (showPedestrianRoads, show3dBuildings, showAdminBoundaries,
-// showLandmarkIconLabels, backgroundPointOfInterestLabels) that Standard silently
-// ignores — so labels leaked into captures and 3D objects were never actually
-// controlled. We explicitly hide all labels and KEEP show3dObjects on so the 3D
-// landmark we want to capture actually renders.
-function makeBasemapConfig(lightPreset) {
+// Minimal Mapbox style: 3D building extrusions on a guaranteed #050505
+// background. The Standard style cannot be used for capture — its layers are
+// encapsulated (getLayer('background') returns nothing), so the old "force
+// the background black" hack never worked and captures were full map scenes
+// the server-side cutout couldn't isolate. With this style the capture is
+// genuinely landmark-on-black, which the poster compositor removes with a
+// deterministic chroma key.
+function makeCaptureStyle(lightPreset) {
+    const lighting = {
+        dawn:  { color: '#ffd9b3', intensity: 0.45 },
+        day:   { color: '#ffffff', intensity: 0.55 },
+        dusk:  { color: '#ffb366', intensity: 0.40 },
+        night: { color: '#7799ff', intensity: 0.30 }
+    }[lightPreset] || { color: '#ffffff', intensity: 0.45 };
+
     return {
-        lightPreset: lightPreset,
-        showPlaceLabels: false,
-        showPointOfInterestLabels: false,
-        showRoadLabels: false,
-        showTransitLabels: false,
-        show3dObjects: true
+        version: 8,
+        sources: {
+            composite: {
+                type: 'vector',
+                url: 'mapbox://mapbox.mapbox-streets-v8'
+            }
+        },
+        light: {
+            anchor: 'viewport',
+            color: lighting.color,
+            intensity: lighting.intensity,
+            position: [1.15, 210, 30]
+        },
+        layers: [
+            {
+                id: 'background',
+                type: 'background',
+                paint: { 'background-color': '#050505' }
+            },
+            {
+                id: 'buildings-3d',
+                type: 'fill-extrusion',
+                source: 'composite',
+                'source-layer': 'building',
+                filter: ['==', ['get', 'extrude'], 'true'],
+                paint: {
+                    'fill-extrusion-color': '#a8adb8',
+                    'fill-extrusion-height': ['get', 'height'],
+                    'fill-extrusion-base': ['get', 'min_height'],
+                    'fill-extrusion-vertical-gradient': true,
+                    'fill-extrusion-opacity': 1
+                }
+            }
+        ]
     };
 }
 
-// Preview 3D landmark
+// Preview 3D landmark — uses the SAME style as the capture so the preview is
+// exactly what ends up on the poster (WYSIWYG). Slider listeners are bound
+// once at page load, not per preview click (they used to accumulate).
 document.getElementById('preview3dBtn').addEventListener('click', () => {
     const cfg = get3DConfig();
     if (isNaN(cfg.lat) || isNaN(cfg.lon)) {
@@ -102,24 +140,26 @@ document.getElementById('preview3dBtn').addEventListener('click', () => {
 
     previewMap = new mapboxgl.Map({
         container: 'mapbox-container',
-        style: 'mapbox://styles/mapbox/standard',
-        config: { basemap: makeBasemapConfig(cfg.lightPreset) },
+        style: makeCaptureStyle(cfg.lightPreset),
         center: [cfg.lon, cfg.lat],
         zoom: cfg.zoom,
         bearing: cfg.bearing,
         pitch: cfg.pitch,
         preserveDrawingBuffer: true
     });
+});
 
-    previewMap.on('load', () => {
-        ['zoom3d', 'pitch3d', 'bearing3d', 'lightPreset'].forEach(id => {
-            document.getElementById(id).addEventListener('input', () => {
-                const c = get3DConfig();
-                previewMap.jumpTo({ zoom: c.zoom, pitch: c.pitch, bearing: c.bearing });
-                previewMap.setConfigProperty('basemap', 'lightPreset', c.lightPreset);
-            });
-        });
+['zoom3d', 'pitch3d', 'bearing3d'].forEach(id => {
+    document.getElementById(id).addEventListener('input', () => {
+        if (!previewMap) return;
+        const c = get3DConfig();
+        previewMap.jumpTo({ zoom: c.zoom, pitch: c.pitch, bearing: c.bearing });
     });
+});
+
+document.getElementById('lightPreset').addEventListener('input', () => {
+    if (!previewMap) return;
+    previewMap.setStyle(makeCaptureStyle(get3DConfig().lightPreset));
 });
 
 // Capture 3D map as base64 PNG — stadium model on dark background only
@@ -136,26 +176,18 @@ function capture3DMap() {
         captureContainer.style.height = '4096px';
         captureContainer.style.background = '#050505';
 
+        // Same style as the preview: buildings on a guaranteed #050505
+        // background, so the server-side chroma key can cleanly cut the
+        // landmark out.
         const captureMap = new mapboxgl.Map({
             container: 'mapbox-capture',
-            style: 'mapbox://styles/mapbox/standard',
-            config: { basemap: makeBasemapConfig(cfg.lightPreset) },
+            style: makeCaptureStyle(cfg.lightPreset),
             center: [cfg.lon, cfg.lat],
             zoom: cfg.zoom,
             bearing: cfg.bearing,
             pitch: cfg.pitch,
             preserveDrawingBuffer: true,
             interactive: false
-        });
-
-        captureMap.on('style.load', () => {
-            // Force background to near-black so only the 3D landmark is visible
-            try {
-                if (captureMap.getLayer('background')) {
-                    captureMap.setPaintProperty('background', 'background-color', '#050505');
-                    captureMap.setPaintProperty('background', 'background-opacity', 1);
-                }
-            } catch (e) { /* layer name may differ in Standard style */ }
         });
 
         let settled = false;

@@ -37,20 +37,30 @@ def add_badge_overlay(ax, badge_path, position, size=0.15, alpha=0.9, glow=True)
         if badge_img.mode != 'RGBA':
             badge_img = badge_img.convert('RGBA')
         
-        # Resize badge
+        # Target size in real output pixels: `size` is the fraction of
+        # poster width the badge should occupy. The old base of
+        # `size * 1000` px bore no relation to the output canvas
+        # (a 200px badge on a 12000px poster).
+        fig = ax.get_figure()
+        poster_width_px = fig.get_figwidth() * fig.dpi
+        target_w = max(1, int(size * poster_width_px))
         aspect_ratio = badge_img.width / badge_img.height
-        new_width = int(size * 1000)  # Base size
-        new_height = int(new_width / aspect_ratio)
-        badge_img = badge_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        
+        target_h = max(1, int(target_w / aspect_ratio))
+
+        # Only ever downscale the source; if the badge file is smaller than
+        # the target, the zoom factor upscales at draw time (source-limited).
+        if badge_img.width > target_w:
+            badge_img = badge_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+
         # Apply alpha
         if alpha < 1.0:
             badge_array = np.array(badge_img)
             badge_array[:, :, 3] = (badge_array[:, :, 3] * alpha).astype(np.uint8)
             badge_img = Image.fromarray(badge_array)
-        
-        # Create OffsetImage
-        imagebox = OffsetImage(badge_img, zoom=1.0)
+
+        # dpi_cor=False: rendered canvas px = image px × zoom (see add_3d_overlay)
+        zoom = target_w / badge_img.width
+        imagebox = OffsetImage(badge_img, zoom=zoom, dpi_cor=False)
         
         # Create annotation
         # If position is (lat, lon), convert to data coordinates
@@ -193,12 +203,52 @@ def calculate_axes_position(lat, lon, map_bounds):
     return (x, y)
 
 
+def _chroma_key_dark_background(img, bg_value=5, t0=8, t1=35):
+    """
+    Deterministic background removal for captures rendered on a known
+    near-black background (#050505).
+
+    Computes each pixel's Chebyshev distance from the background value and
+    maps it through a soft ramp: fully transparent at distance <= t0, fully
+    opaque at distance >= t1. Anti-aliased edges between the landmark and
+    the background land inside the ramp and get smooth partial alpha.
+
+    Replaces the earlier rembg/SAM approach, which required a model
+    download + GPU and silently failed when no point prompt was supplied.
+    """
+    arr = np.asarray(img.convert('RGB'), dtype=np.int16)
+    dist = np.abs(arr - bg_value).max(axis=2)
+    ramp = np.clip((dist - t0) / float(t1 - t0), 0.0, 1.0)
+    alpha = (ramp * 255).astype(np.uint8)
+    rgba = np.dstack([arr.astype(np.uint8), alpha])
+    return Image.fromarray(rgba, 'RGBA')
+
+
+def _radial_vignette_mask(size_px, inner_fraction=0.80):
+    """
+    Circular vignette alpha mask as a numpy array (0-255): opaque inside
+    inner_fraction of the radius, fading smoothly to transparent at the edge.
+    Computed analytically — the previous 1px ellipse-outline loop produced
+    visible banding at print resolution.
+    """
+    yy, xx = np.ogrid[:size_px, :size_px]
+    c = (size_px - 1) / 2.0
+    r = np.sqrt((xx - c) ** 2 + (yy - c) ** 2) / c
+    fade = np.clip((1.0 - r) / (1.0 - inner_fraction), 0.0, 1.0)
+    return (fade * 255).astype(np.uint8)
+
+
 def add_3d_overlay(ax, overlay_path, size='medium', alpha=0.95):
     """
     Add a 3D landmark capture as a centered overlay on the poster.
 
-    The overlay is rendered as a circular vignette with soft edges,
-    placed at the center of the map.
+    The capture is rendered by the browser on a guaranteed #050505
+    background; the background is removed with a deterministic chroma key
+    and a circular vignette softens the edges.
+
+    Sizing is derived from the actual output canvas (figure size × DPI) so
+    the rendered overlay really is the advertised fraction of poster width
+    at full print resolution.
 
     Args:
         ax: Matplotlib axes object
@@ -219,15 +269,8 @@ def add_3d_overlay(ax, overlay_path, size='medium', alpha=0.95):
     try:
         img = Image.open(overlay_path).convert('RGBA')
 
-        # SAM (Segment Anything Model) via rembg — uses center point prompt
-        # Stadium is always centered in the Mapbox capture so this is precise
-        try:
-            from rembg import remove as rembg_remove, new_session
-            session = new_session('sam')
-            img = rembg_remove(img, session=session)
-            print("✓ SAM background removal applied")
-        except Exception as e:
-            print(f"⚠️  SAM not available, skipping: {e}")
+        # Remove the #050505 capture background
+        img = _chroma_key_dark_background(img)
 
         # Crop to square from center
         w, h = img.size
@@ -236,47 +279,32 @@ def add_3d_overlay(ax, overlay_path, size='medium', alpha=0.95):
         top = (h - side) // 2
         img = img.crop((left, top, left + side, top + side))
 
-        # Create circular vignette mask with soft edges
-        mask_size = img.size[0]
-        mask = Image.new('L', (mask_size, mask_size), 0)
-        draw = ImageDraw.Draw(mask)
+        # Target size in real output pixels (poster width in px × fraction)
+        fig = ax.get_figure()
+        poster_width_px = fig.get_figwidth() * fig.dpi
+        target_px = max(1, int(size_fraction * poster_width_px))
 
-        # Draw concentric circles for soft edge fade
-        center = mask_size // 2
-        radius = center
-        # Inner solid region (80% of radius)
-        inner_radius = int(radius * 0.80)
-        draw.ellipse(
-            (center - inner_radius, center - inner_radius,
-             center + inner_radius, center + inner_radius),
-            fill=255
-        )
+        # Only ever downscale — upscaling past the capture's native
+        # resolution is done by the (small) zoom factor at draw time.
+        if img.size[0] > target_px:
+            img = img.resize((target_px, target_px), Image.Resampling.LANCZOS)
 
-        # Fade region from inner to outer edge
-        fade_steps = radius - inner_radius
-        for i in range(fade_steps):
-            r = inner_radius + i
-            fade_alpha = int(255 * (1.0 - (i / fade_steps)))
-            draw.ellipse(
-                (center - r, center - r, center + r, center + r),
-                outline=fade_alpha
-            )
-
-        # Apply mask as alpha channel, combined with existing alpha
+        # Circular vignette, combined with the chroma-key alpha
+        mask = _radial_vignette_mask(img.size[0])
         img_array = np.array(img)
-        mask_array = np.array(mask)
-        # Blend: keep original alpha where mask is 255, fade where mask fades
         img_array[:, :, 3] = np.minimum(
             img_array[:, :, 3],
-            (mask_array * alpha).astype(np.uint8)
+            (mask.astype(np.float32) * alpha).astype(np.uint8)
         )
         img = Image.fromarray(img_array)
 
-        # Scale for display
-        display_px = int(size_fraction * 1000)
-        img = img.resize((display_px, display_px), Image.Resampling.LANCZOS)
-
-        imagebox = OffsetImage(img, zoom=1.0)
+        # dpi_cor=False: rendered size in canvas px = image px × zoom,
+        # independent of DPI. (With the default dpi_cor=True the zoom is
+        # scaled by dpi/72, which at 500 DPI blew images up ~7× past their
+        # pixel data — the old code shipped a 350px image stretched to ~20%
+        # of a 12000px poster.)
+        zoom = target_px / img.size[0]
+        imagebox = OffsetImage(img, zoom=zoom, dpi_cor=False)
         ab = AnnotationBbox(
             imagebox,
             (0.5, 0.55),  # Slightly above center for visual balance
