@@ -70,11 +70,26 @@ def generate():
     if not stadium and (not city or not country):
         return jsonify({'success': False, 'error': 'Provide a stadium name, or both city and country.'})
 
-    # Handle 3D overlay if provided (runs once, reused across all themes)
+    # Handle 3D overlay if provided (runs once, reused across all themes).
+    # Three captures arrive together: A = scene with 3D, B = same camera
+    # without 3D, C = magenta footprint-volume mask. B and C are optional
+    # (older clients / degraded capture) — the compositor falls back to the
+    # vignette medallion without them.
     overlay_3d = data.get('overlay_3d')
+    overlay_3d_base = data.get('overlay_3d_base')
+    overlay_3d_mask = data.get('overlay_3d_mask')
     overlay_size = data.get('overlay_size', 'medium')
+    overlay_tint = bool(data.get('overlay_tint'))
     overlay_config = data.get('overlay_config', {})
     overlay_path = None
+    overlay_base_path = None
+    overlay_mask_path = None
+
+    def _write_capture(b64_data, path):
+        if ',' in b64_data:
+            b64_data = b64_data.split(',', 1)[1]
+        with open(path, 'wb') as f:
+            f.write(base64.b64decode(b64_data))
 
     if overlay_3d:
         try:
@@ -84,19 +99,31 @@ def generate():
             pitch = int(overlay_config.get('pitch', 0))
             bearing = int(overlay_config.get('bearing', 0))
             light = overlay_config.get('lightPreset', 'dusk')
-            cache_name = f"overlay_{lat}_{lon}_z{zoom}_p{pitch}_b{bearing}_{light}.png"
-            overlay_path = os.path.join(OVERLAY_CACHE_DIR, cache_name)
+            cache_base = f"overlay_{lat}_{lon}_z{zoom}_p{pitch}_b{bearing}_{light}"
+            overlay_path = os.path.join(OVERLAY_CACHE_DIR, f"{cache_base}.png")
 
             if not os.path.exists(overlay_path):
-                img_data = overlay_3d
-                if ',' in img_data:
-                    img_data = img_data.split(',', 1)[1]
-                img_bytes = base64.b64decode(img_data)
-                with open(overlay_path, 'wb') as f:
-                    f.write(img_bytes)
-                print(f"3D overlay cached: {cache_name}")
+                _write_capture(overlay_3d, overlay_path)
+                print(f"3D overlay cached: {cache_base}.png")
             else:
-                print(f"3D overlay cache hit: {cache_name}")
+                print(f"3D overlay cache hit: {cache_base}.png")
+
+            if overlay_3d_base:
+                overlay_base_path = os.path.join(OVERLAY_CACHE_DIR, f"{cache_base}_base.png")
+                if not os.path.exists(overlay_base_path):
+                    _write_capture(overlay_3d_base, overlay_base_path)
+            else:
+                # Cache hit case: reuse previously stored companion captures
+                candidate = os.path.join(OVERLAY_CACHE_DIR, f"{cache_base}_base.png")
+                overlay_base_path = candidate if os.path.exists(candidate) else None
+
+            if overlay_3d_mask:
+                overlay_mask_path = os.path.join(OVERLAY_CACHE_DIR, f"{cache_base}_mask.png")
+                if not os.path.exists(overlay_mask_path):
+                    _write_capture(overlay_3d_mask, overlay_mask_path)
+            else:
+                candidate = os.path.join(OVERLAY_CACHE_DIR, f"{cache_base}_mask.png")
+                overlay_mask_path = candidate if os.path.exists(candidate) else None
         except Exception as e:
             return jsonify({'success': False, 'error': f'Failed to process 3D overlay: {e}'})
 
@@ -112,6 +139,12 @@ def generate():
                 cmd.extend(["--city", city, "--country", country])
             if overlay_path:
                 cmd.extend(["--overlay-3d", overlay_path, "--overlay-size", overlay_size])
+                if overlay_base_path:
+                    cmd.extend(["--overlay-3d-base", overlay_base_path])
+                if overlay_mask_path:
+                    cmd.extend(["--overlay-3d-mask", overlay_mask_path])
+                if overlay_tint:
+                    cmd.append("--overlay-tint")
             if badge:
                 badge_path = os.path.join(BASE_DIR, 'badges', badge)
                 if os.path.exists(badge_path):

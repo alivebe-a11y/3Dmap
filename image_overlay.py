@@ -3,7 +3,7 @@ Image overlay module for MapToPoster
 Handles badge/logo placement on maps
 """
 import os
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
@@ -238,13 +238,116 @@ def _radial_vignette_mask(size_px, inner_fraction=0.80):
     return (fade * 255).astype(np.uint8)
 
 
-def add_3d_overlay(ax, overlay_path, size='medium', alpha=0.95):
+def _cutout_from_captures(img_a, base_path, mask_path):
+    """
+    Isolate the stadium/landmark from a three-capture set:
+
+      A (img_a)     — full Mapbox Standard scene WITH 3D objects
+      B (base_path) — identical camera, 3D objects OFF
+      C (mask_path) — magenta volume mask: the stadium footprint extruded
+                      on black, same camera
+
+    alpha = (A differs from B) AND (inside magenta volume). Pixels that are
+    3D (landmark/extrusion) but belong to neighbouring buildings differ
+    between A and B yet fall outside the volume mask; ground inside the
+    volume doesn't differ. What survives is exactly the stadium.
+
+    Returns an RGBA Image, or None if the cutout looks degenerate (caller
+    should fall back to the medallion path).
+    """
+    img_b = Image.open(base_path).convert('RGB')
+    img_c = Image.open(mask_path).convert('RGB')
+
+    if img_b.size != img_a.size or img_c.size != img_a.size:
+        print("⚠️  Capture sizes differ; skipping cutout")
+        return None
+
+    a = np.asarray(img_a.convert('RGB'), dtype=np.int16)
+    b = np.asarray(img_b, dtype=np.int16)
+    c = np.asarray(img_c, dtype=np.int16)
+
+    # Where did the 3D pass change the picture? Soft ramp so anti-aliased
+    # edges keep partial alpha; faint changes (shadows) stay faint.
+    diff = np.abs(a - b).max(axis=2)
+    diff_alpha = np.clip((diff - 8) / 24.0, 0.0, 1.0)
+
+    # Magenta volume: high R and B, low G. Thresholds are generous because
+    # extrusion side faces pick up slight shading even at zero light
+    # intensity, and the black background can never false-positive.
+    volume = (c[:, :, 0] > 120) & (c[:, :, 2] > 120) & (c[:, :, 1] < 110)
+
+    coverage = volume.mean()
+    if coverage < 0.002 or coverage > 0.90:
+        print(f"⚠️  Volume mask coverage {coverage:.1%} out of range; skipping cutout")
+        return None
+
+    alpha = (diff_alpha * volume * 255).astype(np.uint8)
+    if alpha.max() == 0:
+        print("⚠️  Empty cutout (no 3D pixels inside volume); skipping")
+        return None
+
+    rgba = np.dstack([a.astype(np.uint8), alpha])
+    out = Image.fromarray(rgba, 'RGBA')
+
+    # Feather the cut edge slightly so it sits naturally on the poster
+    alpha_img = out.getchannel('A').filter(ImageFilter.GaussianBlur(1.5))
+    out.putalpha(alpha_img)
+    return out
+
+
+def _crop_to_alpha_bbox(img, pad_fraction=0.06):
+    """
+    Crop an RGBA image to the bounding box of its visible pixels (plus
+    padding) so size='35%' refers to the stadium itself, not a mostly
+    transparent capture frame.
+    """
+    alpha = np.asarray(img.getchannel('A'))
+    ys, xs = np.nonzero(alpha > 8)
+    if len(xs) == 0:
+        return img
+    pad = int(max(img.size) * pad_fraction)
+    left = max(0, xs.min() - pad)
+    right = min(img.size[0], xs.max() + pad)
+    top = max(0, ys.min() - pad)
+    bottom = min(img.size[1], ys.max() + pad)
+    if right <= left or bottom <= top:
+        return img
+    return img.crop((left, top, right, bottom))
+
+
+def _tint_to_theme(img, tint_hex, strength=0.65):
+    """
+    Recolour the cutout toward a theme colour while preserving luminance,
+    so the 3D hero matches the poster palette. strength 0..1 blends between
+    the original colours and the fully tinted version.
+    """
+    try:
+        tint_hex = tint_hex.lstrip('#')
+        tr, tg, tb = (int(tint_hex[i:i + 2], 16) for i in (0, 2, 4))
+    except Exception:
+        print(f"⚠️  Bad tint colour '{tint_hex}', skipping tint")
+        return img
+
+    arr = np.asarray(img, dtype=np.float32)
+    lum = (0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2]) / 255.0
+    tinted = np.stack([lum * tr, lum * tg, lum * tb], axis=2)
+    arr[:, :, :3] = arr[:, :, :3] * (1 - strength) + tinted * strength
+    return Image.fromarray(arr.astype(np.uint8), 'RGBA')
+
+
+def add_3d_overlay(ax, overlay_path, size='medium', alpha=0.95,
+                   base_path=None, mask_path=None, tint_color=None):
     """
     Add a 3D landmark capture as a centered overlay on the poster.
 
-    The capture is rendered by the browser on a guaranteed #050505
-    background; the background is removed with a deterministic chroma key
-    and a circular vignette softens the edges.
+    Preferred path (three captures): a diff between the with-3D and
+    without-3D Standard renders, intersected with the stadium's extruded
+    footprint volume, isolates the stadium alone — landmark model where
+    Mapbox has one, generic extrusion where it doesn't. The cutout is
+    cropped to its content and placed directly (no vignette).
+
+    Fallback (single capture): legacy behaviour — chroma-key if the frame
+    is on the old black background, then a circular vignette medallion.
 
     Sizing is derived from the actual output canvas (figure size × DPI) so
     the rendered overlay really is the advertised fraction of poster width
@@ -252,9 +355,12 @@ def add_3d_overlay(ax, overlay_path, size='medium', alpha=0.95):
 
     Args:
         ax: Matplotlib axes object
-        overlay_path: Path to the 3D capture PNG file
+        overlay_path: Path to capture A (full scene with 3D)
         size: 'small' (20%), 'medium' (35%), or 'large' (50%) of poster width
         alpha: Overall transparency (0.0-1.0)
+        base_path: Path to capture B (same camera, 3D off), optional
+        mask_path: Path to capture C (magenta footprint volume), optional
+        tint_color: '#RRGGBB' to tint the cutout toward the theme, optional
 
     Returns:
         AnnotationBbox object or None
@@ -267,17 +373,36 @@ def add_3d_overlay(ax, overlay_path, size='medium', alpha=0.95):
     size_fraction = size_map.get(size, 0.35)
 
     try:
-        img = Image.open(overlay_path).convert('RGBA')
+        img_a = Image.open(overlay_path).convert('RGBA')
+        img = None
+        used_cutout = False
 
-        # Remove the #050505 capture background
-        img = _chroma_key_dark_background(img)
+        if base_path and mask_path and os.path.exists(base_path) and os.path.exists(mask_path):
+            img = _cutout_from_captures(img_a, base_path, mask_path)
+            if img is not None:
+                used_cutout = True
+                print("✓ Stadium isolated via diff + footprint volume")
 
-        # Crop to square from center
-        w, h = img.size
-        side = min(w, h)
-        left = (w - side) // 2
-        top = (h - side) // 2
-        img = img.crop((left, top, left + side, top + side))
+        if img is None:
+            # Legacy single-capture path: chroma-key only makes sense on the
+            # old black-background captures; otherwise vignette the scene.
+            arr = np.asarray(img_a.convert('RGB'))
+            if np.median(arr.max(axis=2)) <= 12:
+                img = _chroma_key_dark_background(img_a)
+            else:
+                img = img_a
+            # Crop to square from center for the medallion
+            w, h = img.size
+            side = min(w, h)
+            left = (w - side) // 2
+            top = (h - side) // 2
+            img = img.crop((left, top, left + side, top + side))
+
+        if used_cutout:
+            img = _crop_to_alpha_bbox(img)
+
+        if tint_color:
+            img = _tint_to_theme(img, tint_color)
 
         # Target size in real output pixels (poster width in px × fraction)
         fig = ax.get_figure()
@@ -287,16 +412,18 @@ def add_3d_overlay(ax, overlay_path, size='medium', alpha=0.95):
         # Only ever downscale — upscaling past the capture's native
         # resolution is done by the (small) zoom factor at draw time.
         if img.size[0] > target_px:
-            img = img.resize((target_px, target_px), Image.Resampling.LANCZOS)
+            target_h = max(1, int(img.size[1] * target_px / img.size[0]))
+            img = img.resize((target_px, target_h), Image.Resampling.LANCZOS)
 
-        # Circular vignette, combined with the chroma-key alpha
-        mask = _radial_vignette_mask(img.size[0])
-        img_array = np.array(img)
-        img_array[:, :, 3] = np.minimum(
-            img_array[:, :, 3],
-            (mask.astype(np.float32) * alpha).astype(np.uint8)
-        )
-        img = Image.fromarray(img_array)
+        if not used_cutout:
+            # Circular vignette for the medallion look
+            mask = _radial_vignette_mask(img.size[0])
+            img_array = np.array(img)
+            img_array[:, :, 3] = np.minimum(
+                img_array[:, :, 3],
+                (mask.astype(np.float32) * alpha).astype(np.uint8)
+            )
+            img = Image.fromarray(img_array)
 
         # dpi_cor=False: rendered size in canvas px = image px × zoom,
         # independent of DPI. (With the default dpi_cor=True the zoom is

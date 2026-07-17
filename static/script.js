@@ -68,52 +68,50 @@ function get3DConfig() {
     };
 }
 
-// Minimal Mapbox style: 3D building extrusions on a guaranteed #050505
-// background. The Standard style cannot be used for capture — its layers are
-// encapsulated (getLayer('background') returns nothing), so the old "force
-// the background black" hack never worked and captures were full map scenes
-// the server-side cutout couldn't isolate. With this style the capture is
-// genuinely landmark-on-black, which the poster compositor removes with a
-// deterministic chroma key.
-function makeCaptureStyle(lightPreset) {
-    const lighting = {
-        dawn:  { color: '#ffd9b3', intensity: 0.45 },
-        day:   { color: '#ffffff', intensity: 0.55 },
-        dusk:  { color: '#ffb366', intensity: 0.40 },
-        night: { color: '#7799ff', intensity: 0.30 }
-    }[lightPreset] || { color: '#ffffff', intensity: 0.45 };
+// Mapbox Standard map options shared by the preview and captures A/B.
+// Standard renders the detailed 3D landmark models (the whole point of the
+// hero shot); labels are hidden via its documented config properties.
+function standardMapOptions(cfg) {
+    return {
+        style: 'mapbox://styles/mapbox/standard',
+        config: {
+            basemap: {
+                lightPreset: cfg.lightPreset,
+                showPlaceLabels: false,
+                showPointOfInterestLabels: false,
+                showRoadLabels: false,
+                showTransitLabels: false,
+                show3dObjects: true
+            }
+        },
+        center: [cfg.lon, cfg.lat],
+        zoom: cfg.zoom,
+        bearing: cfg.bearing,
+        pitch: cfg.pitch,
+        preserveDrawingBuffer: true
+    };
+}
 
+// Style for capture C: the stadium's footprint polygons extruded as a flat
+// magenta volume on black. The server intersects (A minus B) with this
+// volume so ONLY the stadium survives — no segmentation model involved.
+function makeMaskStyle(footprintsGeojson, heightM) {
     return {
         version: 8,
         sources: {
-            composite: {
-                type: 'vector',
-                url: 'mapbox://mapbox.mapbox-streets-v8'
-            }
+            fp: { type: 'geojson', data: footprintsGeojson }
         },
-        light: {
-            anchor: 'viewport',
-            color: lighting.color,
-            intensity: lighting.intensity,
-            position: [1.15, 210, 30]
-        },
+        light: { anchor: 'viewport', color: '#ffffff', intensity: 0 },
         layers: [
+            { id: 'bg', type: 'background', paint: { 'background-color': '#000000' } },
             {
-                id: 'background',
-                type: 'background',
-                paint: { 'background-color': '#050505' }
-            },
-            {
-                id: 'buildings-3d',
+                id: 'vol',
                 type: 'fill-extrusion',
-                source: 'composite',
-                'source-layer': 'building',
-                filter: ['==', ['get', 'extrude'], 'true'],
+                source: 'fp',
                 paint: {
-                    'fill-extrusion-color': '#a8adb8',
-                    'fill-extrusion-height': ['get', 'height'],
-                    'fill-extrusion-base': ['get', 'min_height'],
-                    'fill-extrusion-vertical-gradient': true,
+                    'fill-extrusion-color': '#ff00ff',
+                    'fill-extrusion-height': heightM,
+                    'fill-extrusion-base': 0,
                     'fill-extrusion-opacity': 1
                 }
             }
@@ -121,9 +119,79 @@ function makeCaptureStyle(lightPreset) {
     };
 }
 
-// Preview 3D landmark — uses the SAME style as the capture so the preview is
-// exactly what ends up on the poster (WYSIWYG). Slider listeners are bound
-// once at page load, not per preview click (they used to accumulate).
+// Pick the building footprints that form the stadium at the map centre.
+// Ring-shaped stands surround the pitch, so the centre point is often NOT
+// inside the polygon — prefer polygons whose bbox contains the centre,
+// falling back to the nearest footprints within ~120 m.
+function selectStadiumFootprints(features, center) {
+    const mPerDegLat = 111320;
+    const mPerDegLon = 111320 * Math.cos(center.lat * Math.PI / 180);
+    const containing = [];
+    const near = [];
+
+    for (const f of features) {
+        const g = f.geometry;
+        if (!g || (g.type !== 'Polygon' && g.type !== 'MultiPolygon')) continue;
+        const polys = g.type === 'Polygon' ? [g.coordinates] : g.coordinates;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const poly of polys) {
+            for (const pt of poly[0]) {
+                if (pt[0] < minX) minX = pt[0];
+                if (pt[0] > maxX) maxX = pt[0];
+                if (pt[1] < minY) minY = pt[1];
+                if (pt[1] > maxY) maxY = pt[1];
+            }
+        }
+        const height = Number(f.properties && f.properties.height) || 0;
+        const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+        const distM = Math.hypot((cx - center.lng) * mPerDegLon, (cy - center.lat) * mPerDegLat);
+        const item = { geometry: g, height, distM };
+        if (center.lng >= minX && center.lng <= maxX && center.lat >= minY && center.lat <= maxY) {
+            containing.push(item);
+        } else if (distM < 120) {
+            near.push(item);
+        }
+    }
+
+    let chosen = containing;
+    if (!chosen.length) {
+        near.sort((a, b) => a.distM - b.distM);
+        chosen = near.slice(0, 6);
+    }
+
+    const maxHeight = chosen.reduce((m, i) => Math.max(m, i.height), 0);
+    return {
+        fc: {
+            type: 'FeatureCollection',
+            features: chosen.map(i => ({ type: 'Feature', properties: {}, geometry: i.geometry }))
+        },
+        // Generous volume height so a pitched camera's view of the roof
+        // stays inside the mask
+        height: Math.max(45, maxHeight * 1.4),
+        count: chosen.length
+    };
+}
+
+// Wait for a map to go idle; resolves (never rejects) after timeoutMs as a
+// hard fallback so a stalled style can't hang the capture pipeline.
+function waitForIdle(map, timeoutMs, settleMs) {
+    return new Promise((resolve) => {
+        let settled = false;
+        const done = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(hard);
+            setTimeout(resolve, settleMs || 0);
+        };
+        map.on('idle', done);
+        map.on('error', done);
+        const hard = setTimeout(done, timeoutMs);
+    });
+}
+
+// Preview 3D landmark — Mapbox Standard, so the detailed landmark model is
+// visible while framing the shot. Slider listeners are bound once at page
+// load, not per preview click (they used to accumulate).
 document.getElementById('preview3dBtn').addEventListener('click', () => {
     const cfg = get3DConfig();
     if (isNaN(cfg.lat) || isNaN(cfg.lon)) {
@@ -140,12 +208,7 @@ document.getElementById('preview3dBtn').addEventListener('click', () => {
 
     previewMap = new mapboxgl.Map({
         container: 'mapbox-container',
-        style: makeCaptureStyle(cfg.lightPreset),
-        center: [cfg.lon, cfg.lat],
-        zoom: cfg.zoom,
-        bearing: cfg.bearing,
-        pitch: cfg.pitch,
-        preserveDrawingBuffer: true
+        ...standardMapOptions(cfg)
     });
 });
 
@@ -159,29 +222,77 @@ document.getElementById('preview3dBtn').addEventListener('click', () => {
 
 document.getElementById('lightPreset').addEventListener('input', () => {
     if (!previewMap) return;
-    previewMap.setStyle(makeCaptureStyle(get3DConfig().lightPreset));
+    try {
+        previewMap.setConfigProperty('basemap', 'lightPreset', get3DConfig().lightPreset);
+    } catch (e) { /* style still loading */ }
 });
 
-// Capture 3D map as base64 PNG — stadium model on dark background only
-function capture3DMap() {
-    return new Promise((resolve, reject) => {
-        const cfg = get3DConfig();
-        if (isNaN(cfg.lat) || isNaN(cfg.lon)) {
-            reject(new Error('3D coordinates required'));
-            return;
-        }
+// Three-capture pipeline for stadium isolation:
+//   A — Standard scene with 3D objects (landmark model renders here)
+//   B — identical camera, 3D objects off
+//   C — magenta volume of the stadium footprint on black
+// The server keeps pixels that are 3D (A≠B) AND inside the volume (C):
+// exactly the stadium, with automatic fallback to a generic extrusion where
+// Mapbox has no landmark model, and to the vignette medallion if the
+// footprint can't be found at all.
+async function capture3DMap(onProgress) {
+    const cfg = get3DConfig();
+    if (isNaN(cfg.lat) || isNaN(cfg.lon)) {
+        throw new Error('3D coordinates required');
+    }
+    const progress = onProgress || (() => {});
 
-        const captureContainer = document.getElementById('mapbox-capture');
-        captureContainer.style.width = '4096px';
-        captureContainer.style.height = '4096px';
-        captureContainer.style.background = '#050505';
+    const captureContainer = document.getElementById('mapbox-capture');
+    captureContainer.style.width = '4096px';
+    captureContainer.style.height = '4096px';
+    captureContainer.style.background = '#050505';
 
-        // Same style as the preview: buildings on a guaranteed #050505
-        // background, so the server-side chroma key can cleanly cut the
-        // landmark out.
-        const captureMap = new mapboxgl.Map({
+    // --- Capture A: full scene with 3D ---
+    progress('Capturing 3D scene (1/3)...');
+    const map = new mapboxgl.Map({
+        container: 'mapbox-capture',
+        ...standardMapOptions(cfg),
+        interactive: false
+    });
+
+    // Invisible building layer so we can query the stadium footprint from
+    // Mapbox's own vector data (Standard's internal layers can't be queried).
+    map.on('style.load', () => {
+        try {
+            map.addSource('fpq', { type: 'vector', url: 'mapbox://mapbox.mapbox-streets-v8' });
+            map.addLayer({
+                id: 'fpq-fill', type: 'fill', source: 'fpq',
+                'source-layer': 'building', paint: { 'fill-opacity': 0 }
+            });
+        } catch (e) { /* footprint query is best-effort */ }
+    });
+
+    await waitForIdle(map, 20000, 2000);
+    const imageA = map.getCanvas().toDataURL('image/png');
+
+    let footprints = { fc: null, height: 0, count: 0 };
+    try {
+        const feats = map.querySourceFeatures('fpq', { sourceLayer: 'building' });
+        footprints = selectStadiumFootprints(feats, { lng: cfg.lon, lat: cfg.lat });
+    } catch (e) { /* fall through to medallion */ }
+
+    // --- Capture B: same camera, 3D off ---
+    progress('Capturing base scene (2/3)...');
+    let imageB = null;
+    try {
+        map.setConfigProperty('basemap', 'show3dObjects', false);
+        await waitForIdle(map, 15000, 800);
+        imageB = map.getCanvas().toDataURL('image/png');
+    } catch (e) { /* fall through to medallion */ }
+    map.remove();
+
+    // --- Capture C: footprint volume mask ---
+    let imageC = null;
+    if (imageB && footprints.count > 0) {
+        progress('Capturing footprint mask (3/3)...');
+        const maskMap = new mapboxgl.Map({
             container: 'mapbox-capture',
-            style: makeCaptureStyle(cfg.lightPreset),
+            style: makeMaskStyle(footprints.fc, footprints.height),
             center: [cfg.lon, cfg.lat],
             zoom: cfg.zoom,
             bearing: cfg.bearing,
@@ -189,39 +300,12 @@ function capture3DMap() {
             preserveDrawingBuffer: true,
             interactive: false
         });
+        await waitForIdle(maskMap, 15000, 500);
+        imageC = maskMap.getCanvas().toDataURL('image/png');
+        maskMap.remove();
+    }
 
-        let settled = false;
-        const finish = (fn, arg) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(hardTimeout);
-            try { captureMap.remove(); } catch (e) { /* already removed */ }
-            fn(arg);
-        };
-
-        const doCapture = () => {
-            try {
-                const canvas = captureMap.getCanvas();
-                const dataURL = canvas.toDataURL('image/png');
-                finish(resolve, dataURL);
-            } catch (err) {
-                finish(reject, err);
-            }
-        };
-
-        captureMap.on('idle', () => {
-            // Give 3D geometry a moment to settle, then capture
-            setTimeout(doCapture, 2000);
-        });
-
-        captureMap.on('error', (err) => {
-            finish(reject, err);
-        });
-
-        // Hard fallback: if 'idle' never fires (partial style failure that emits no
-        // 'error'), capture whatever has rendered so the promise can't hang forever.
-        const hardTimeout = setTimeout(doCapture, 15000);
-    });
+    return { imageA, imageB, imageC };
 }
 
 // Form submit
@@ -264,11 +348,13 @@ document.getElementById('mapForm').addEventListener('submit', async (e) => {
 
         // If 3D is enabled, capture the map first
         if (document.getElementById('enable3d').checked) {
-            loader.textContent = '🔄 Capturing 3D landmark...';
             const cfg = get3DConfig();
-            const dataURL = await capture3DMap();
-            payload.overlay_3d = dataURL;
+            const caps = await capture3DMap(msg => { loader.textContent = '🔄 ' + msg; });
+            payload.overlay_3d = caps.imageA;
+            if (caps.imageB) payload.overlay_3d_base = caps.imageB;
+            if (caps.imageC) payload.overlay_3d_mask = caps.imageC;
             payload.overlay_size = cfg.overlaySize;
+            payload.overlay_tint = document.getElementById('overlayTint').checked;
             payload.overlay_config = {
                 lat: cfg.lat, lon: cfg.lon,
                 zoom: cfg.zoom, pitch: cfg.pitch, bearing: cfg.bearing,

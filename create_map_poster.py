@@ -217,7 +217,8 @@ def create_gradient_fade(ax, THEME, height_fraction=0.15):
 def create_poster(city, country, theme_name='feature_based', distance=29000,
                  width=24, height=34, dpi=500, attribution='BlueBearLabs',
                  stadium=None, badge_path=None, coords=None, marker_style='star',
-                 overlay_3d=None, overlay_size='medium'):
+                 overlay_3d=None, overlay_size='medium',
+                 overlay_3d_base=None, overlay_3d_mask=None, overlay_tint=False):
     """
     Create a map poster with caching support for OSM data.
     
@@ -460,7 +461,13 @@ def create_poster(city, country, theme_name='feature_based', distance=29000,
     # Add 3D landmark overlay if provided
     if overlay_3d and os.path.exists(overlay_3d):
         print(f"🏛️  Adding 3D landmark overlay ({overlay_size})...")
-        add_3d_overlay(ax, overlay_3d, size=overlay_size, alpha=0.95)
+        # Optional theme tint: hero picks up the poster palette
+        tint = None
+        if overlay_tint:
+            tint = THEME.get('building_3d', THEME.get('road_primary'))
+        add_3d_overlay(ax, overlay_3d, size=overlay_size, alpha=0.95,
+                       base_path=overlay_3d_base, mask_path=overlay_3d_mask,
+                       tint_color=tint)
 
     # Add gradient fades
     create_gradient_fade(ax, THEME)
@@ -629,6 +636,12 @@ Examples:
                        choices=['small', 'medium', 'large'],
                        default='medium',
                        help='Size of the 3D overlay (default: medium)')
+    parser.add_argument('--overlay-3d-base', type=str,
+                       help='Path to the matching no-3D capture (for stadium isolation)')
+    parser.add_argument('--overlay-3d-mask', type=str,
+                       help='Path to the magenta footprint-volume capture (for stadium isolation)')
+    parser.add_argument('--overlay-tint', action='store_true',
+                       help='Tint the 3D overlay toward the theme colour')
     
     # Listing options
     parser.add_argument('--list-themes', action='store_true',
@@ -735,7 +748,10 @@ Examples:
         coords=coords,
         marker_style=marker_style,
         overlay_3d=args.overlay_3d,
-        overlay_size=args.overlay_size
+        overlay_size=args.overlay_size,
+        overlay_3d_base=args.overlay_3d_base,
+        overlay_3d_mask=args.overlay_3d_mask,
+        overlay_tint=args.overlay_tint
     )
 
 if __name__ == "__main__":
