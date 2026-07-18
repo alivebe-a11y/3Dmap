@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import numpy as np
+from scipy import ndimage
 
 
 def add_badge_overlay(ax, badge_path, position, size=0.15, alpha=0.9, glow=True):
@@ -290,6 +291,16 @@ def _cutout_from_captures(img_a, base_path, mask_path):
     if alpha.max() == 0:
         print("⚠️  Empty cutout (no 3D pixels inside volume); skipping")
         return None
+
+    # The diff goes to zero wherever the 3D pixel happens to match the
+    # colour of the ground beneath it (light roof over light car park,
+    # pitch over grass) — leaving translucent holes the base map shows
+    # through. Those holes are enclosed by the high-diff stand edges, so
+    # fill them: enclosed zeros become solid, while regions touching the
+    # outside (e.g. sky above the roof inside the volume) stay transparent.
+    filled = ndimage.binary_fill_holes(alpha > 40)
+    interior = ndimage.binary_erosion(filled, iterations=3)  # keep the soft rim
+    alpha[interior] = 255
 
     rgba = np.dstack([a.astype(np.uint8), alpha])
     out = Image.fromarray(rgba, 'RGBA')

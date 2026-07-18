@@ -442,8 +442,10 @@ def create_poster(city, country, theme_name='feature_based', distance=29000,
         print(f"⚠️  Badge file not found: {badge_path}")
     
     # Add stadium marker if in stadium mode (and marker style specified)
-    # Skip marker if badge is provided (badge replaces marker)
-    if stadium_data and marker_style and not badge_path:
+    # Skip marker if a badge or a 3D hero replaces it — the marker's zorder
+    # (12) is above the overlay (8), so it would stamp a star on the stadium.
+    has_3d_hero = bool(overlay_3d and os.path.exists(overlay_3d))
+    if stadium_data and marker_style and not badge_path and not has_3d_hero:
         print(f"📍 Adding {marker_style} marker at stadium location...")
         # Determine marker color based on theme
         marker_color = THEME.get('text', '#FFFFFF')
@@ -455,8 +457,8 @@ def create_poster(city, country, theme_name='feature_based', distance=29000,
             style=marker_style,
             alpha=0.9
         )
-    elif stadium_data and marker_style and badge_path:
-        print(f"ℹ️  Skipping marker - badge provided instead")
+    elif stadium_data and marker_style:
+        print(f"ℹ️  Skipping marker - {'badge' if badge_path else '3D hero'} provided instead")
 
     # Add 3D landmark overlay if provided
     if overlay_3d and os.path.exists(overlay_3d):
