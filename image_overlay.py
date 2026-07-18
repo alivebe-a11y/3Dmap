@@ -295,10 +295,27 @@ def _cutout_from_captures(img_a, base_path, mask_path):
     # The diff goes to zero wherever the 3D pixel happens to match the
     # colour of the ground beneath it (light roof over light car park,
     # pitch over grass) — leaving translucent holes the base map shows
-    # through. Those holes are enclosed by the high-diff stand edges, so
-    # fill them: enclosed zeros become solid, while regions touching the
-    # outside (e.g. sky above the roof inside the volume) stay transparent.
-    filled = ndimage.binary_fill_holes(alpha > 40)
+    # through. Seal small breaks in the boundary first (shadow-side walls
+    # against dark ground can open the outline at its base), then fill:
+    # enclosed zeros become solid, while regions touching the outside
+    # (e.g. sky above the roof inside the volume) stay transparent.
+    closed = ndimage.binary_closing(alpha > 40, iterations=3)
+    filled = ndimage.binary_fill_holes(closed)
+
+    # Prune components detached from the stadium itself: buildings behind
+    # the stadium that project into the volume silhouette survive the
+    # diff+volume test but arrive as separate blobs. Keep the largest
+    # component and anything at least 5% of its area.
+    labels, n = ndimage.label(filled)
+    if n > 1:
+        sizes = ndimage.sum_labels(np.ones_like(labels), labels, index=np.arange(1, n + 1))
+        keep_ids = [i + 1 for i, s in enumerate(sizes) if s >= 0.05 * sizes.max()]
+        keep = np.isin(labels, keep_ids)
+        # Zero the discarded blobs' soft alpha too (dilate so the kept
+        # blob's feathered rim survives)
+        alpha[~ndimage.binary_dilation(keep, iterations=4)] = 0
+        filled = keep
+
     interior = ndimage.binary_erosion(filled, iterations=3)  # keep the soft rim
     alpha[interior] = 255
 

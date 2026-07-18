@@ -95,7 +95,7 @@ function standardMapOptions(cfg) {
 // Style for capture C: the stadium's footprint polygons extruded as a flat
 // magenta volume on black. The server intersects (A minus B) with this
 // volume so ONLY the stadium survives — no segmentation model involved.
-function makeMaskStyle(footprintsGeojson, heightM) {
+function makeMaskStyle(footprintsGeojson) {
     return {
         version: 8,
         sources: {
@@ -110,7 +110,12 @@ function makeMaskStyle(footprintsGeojson, heightM) {
                 source: 'fp',
                 paint: {
                     'fill-extrusion-color': '#ff00ff',
-                    'fill-extrusion-height': heightM,
+                    // Per-feature height with a slim 12% overshoot. A tall
+                    // flat volume (the old 1.4x + 45m floor) left a wide
+                    // band above the real roofline where buildings BEHIND
+                    // the stadium projected into the silhouette and leaked
+                    // into the cutout.
+                    'fill-extrusion-height': ['*', 1.12, ['get', 'h']],
                     'fill-extrusion-base': 0,
                     'fill-extrusion-opacity': 1
                 }
@@ -159,15 +164,18 @@ function selectStadiumFootprints(features, center) {
         chosen = near.slice(0, 6);
     }
 
-    const maxHeight = chosen.reduce((m, i) => Math.max(m, i.height), 0);
     return {
         fc: {
             type: 'FeatureCollection',
-            features: chosen.map(i => ({ type: 'Feature', properties: {}, geometry: i.geometry }))
+            // Carry each footprint's real height (fallback 45 m when the
+            // tile has no height data) — the mask style extrudes per
+            // feature so the volume hugs the actual roofline.
+            features: chosen.map(i => ({
+                type: 'Feature',
+                properties: { h: i.height > 0 ? i.height : 45 },
+                geometry: i.geometry
+            }))
         },
-        // Generous volume height so a pitched camera's view of the roof
-        // stays inside the mask
-        height: Math.max(45, maxHeight * 1.4),
         count: chosen.length
     };
 }
@@ -279,7 +287,7 @@ async function capture3DMap(onProgress) {
     await waitForIdle(map, 20000, 2000);
     const imageA = map.getCanvas().toDataURL('image/png');
 
-    let footprints = { fc: null, height: 0, count: 0 };
+    let footprints = { fc: null, count: 0 };
     try {
         const feats = map.querySourceFeatures('fpq', { sourceLayer: 'building' });
         footprints = selectStadiumFootprints(feats, { lng: cfg.lon, lat: cfg.lat });
@@ -301,7 +309,7 @@ async function capture3DMap(onProgress) {
         progress('Capturing footprint mask (3/3)...');
         const maskMap = new mapboxgl.Map({
             container: 'mapbox-capture',
-            style: makeMaskStyle(footprints.fc, footprints.height),
+            style: makeMaskStyle(footprints.fc),
             center: [captureCfg.lon, captureCfg.lat],
             zoom: captureCfg.zoom,
             bearing: captureCfg.bearing,
