@@ -276,9 +276,14 @@ def _cutout_from_captures(img_a, base_path, mask_path):
     # intensity, and the black background can never false-positive.
     volume = (c[:, :, 0] > 120) & (c[:, :, 2] > 120) & (c[:, :, 1] < 110)
 
+    # Sanity: reject only when essentially nothing rendered (style failed to
+    # load) or the volume swallowed the whole frame. An absolute pixel count,
+    # not a percentage — a correctly-framed stadium can legitimately be a
+    # small fraction of a 4096px capture.
+    vol_px = int(volume.sum())
     coverage = volume.mean()
-    if coverage < 0.002 or coverage > 0.90:
-        print(f"⚠️  Volume mask coverage {coverage:.1%} out of range; skipping cutout")
+    if vol_px < 400 or coverage > 0.90:
+        print(f"⚠️  Volume mask degenerate ({vol_px}px, {coverage:.1%} of frame); skipping cutout")
         return None
 
     alpha = (diff_alpha * volume * 255).astype(np.uint8)
@@ -382,6 +387,13 @@ def add_3d_overlay(ax, overlay_path, size='medium', alpha=0.95,
             if img is not None:
                 used_cutout = True
                 print("✓ Stadium isolated via diff + footprint volume")
+            else:
+                # A cutout was attempted and failed. Stamping the dark
+                # medallion on (e.g.) a light theme ruins the poster —
+                # better to ship it without a hero and say so loudly.
+                print("⚠️  Cutout failed — poster generated WITHOUT the 3D overlay "
+                      "(medallion fallback is only used for single-capture clients)")
+                return None
 
         if img is None:
             # Legacy single-capture path: chroma-key only makes sense on the

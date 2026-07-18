@@ -247,11 +247,20 @@ async function capture3DMap(onProgress) {
     captureContainer.style.height = '4096px';
     captureContainer.style.background = '#050505';
 
+    // Zoom fixes metres-per-pixel, so a 4096px canvas at the preview's zoom
+    // frames a ~10x wider area and leaves the stadium a few hundred pixels
+    // tall (blurry on the poster, and so small the volume-mask sanity check
+    // rejected it). Raise the zoom by log2(capture/preview) so the capture
+    // reproduces the preview's framing at full 4096px resolution.
+    const previewEl = document.getElementById('mapbox-container');
+    const previewW = (previewEl && previewEl.clientWidth) ? previewEl.clientWidth : 480;
+    const captureCfg = { ...cfg, zoom: Math.min(22, cfg.zoom + Math.log2(4096 / previewW)) };
+
     // --- Capture A: full scene with 3D ---
     progress('Capturing 3D scene (1/3)...');
     const map = new mapboxgl.Map({
         container: 'mapbox-capture',
-        ...standardMapOptions(cfg),
+        ...standardMapOptions(captureCfg),
         interactive: false
     });
 
@@ -293,10 +302,10 @@ async function capture3DMap(onProgress) {
         const maskMap = new mapboxgl.Map({
             container: 'mapbox-capture',
             style: makeMaskStyle(footprints.fc, footprints.height),
-            center: [cfg.lon, cfg.lat],
-            zoom: cfg.zoom,
-            bearing: cfg.bearing,
-            pitch: cfg.pitch,
+            center: [captureCfg.lon, captureCfg.lat],
+            zoom: captureCfg.zoom,
+            bearing: captureCfg.bearing,
+            pitch: captureCfg.pitch,
             preserveDrawingBuffer: true,
             interactive: false
         });
