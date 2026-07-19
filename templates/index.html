@@ -60,6 +60,12 @@
                     </div>
 
                     <div id="controls3d" class="controls-3d hidden">
+                        <div class="mode-tabs hero-style-tabs">
+                            <button type="button" class="tab-btn active" id="tabHeroGraphic"
+                                    onclick="setHeroStyle('graphic')">Graphic</button>
+                            <button type="button" class="tab-btn" id="tabHeroPhoto"
+                                    onclick="setHeroStyle('photo')">Photo (Satellite)</button>
+                        </div>
                         <label>Latitude
                             <input type="number" id="lat3d" step="any" placeholder="e.g. 53.46308">
                         </label>

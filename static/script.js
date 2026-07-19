@@ -68,12 +68,39 @@ function get3DConfig() {
     };
 }
 
-// Mapbox Standard map options shared by the preview and captures A/B.
-// Standard renders the detailed 3D landmark models (the whole point of the
-// hero shot); labels are hidden via its documented config properties.
+// Hero style: 'graphic' = Mapbox Standard (stylised), 'photo' = Standard
+// Satellite (real imagery with the same 3D landmark models on top). Both
+// share the same config surface, so the whole A/B/C capture pipeline is
+// style-agnostic — the diff+volume cutout works identically.
+const HERO_STYLES = {
+    graphic: 'mapbox://styles/mapbox/standard',
+    photo: 'mapbox://styles/mapbox/standard-satellite'
+};
+let heroStyle = 'graphic';
+
+function setHeroStyle(mode) {
+    if (!HERO_STYLES[mode]) return;
+    heroStyle = mode;
+    document.getElementById('tabHeroGraphic').classList.toggle('active', mode === 'graphic');
+    document.getElementById('tabHeroPhoto').classList.toggle('active', mode === 'photo');
+    // Rebuild the preview in the new style if it's open
+    if (previewMap) {
+        const cfg = get3DConfig();
+        previewMap.remove();
+        previewMap = new mapboxgl.Map({
+            container: 'mapbox-container',
+            ...standardMapOptions(cfg)
+        });
+    }
+}
+
+// Mapbox Standard(-Satellite) map options shared by the preview and captures
+// A/B. Both styles render the detailed 3D landmark models (the whole point
+// of the hero shot); labels are hidden via their documented config
+// properties.
 function standardMapOptions(cfg) {
     return {
-        style: 'mapbox://styles/mapbox/standard',
+        style: HERO_STYLES[heroStyle],
         config: {
             basemap: {
                 lightPreset: cfg.lightPreset,
@@ -375,7 +402,8 @@ document.getElementById('mapForm').addEventListener('submit', async (e) => {
             payload.overlay_config = {
                 lat: cfg.lat, lon: cfg.lon,
                 zoom: cfg.zoom, pitch: cfg.pitch, bearing: cfg.bearing,
-                lightPreset: cfg.lightPreset
+                lightPreset: cfg.lightPreset,
+                hero: heroStyle
             };
         }
 

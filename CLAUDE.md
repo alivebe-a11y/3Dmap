@@ -15,8 +15,9 @@ across them.
 ## Architecture
 - `app.py` — Flask. `/generate` spawns `create_map_poster.py` per theme
   (subprocess). Caches browser captures in `overlays_cache/` keyed by
-  camera+light; key is VERSIONED (`overlay_v2_...`) — bump the version whenever
-  capture framing/geometry changes so stale captures retire themselves.
+  camera+light+hero style; key is VERSIONED (`overlay_v2_...`) — bump the
+  version whenever capture framing/geometry changes so stale captures retire
+  themselves.
 - `create_map_poster.py` — OSMnx fetch (cached) + matplotlib render. Full-bleed
   axes [0,0,1,1], view cropped to poster aspect (fetch dist = distance * h/w).
   Never use bbox_inches='tight' (breaks exact dimensions).
@@ -25,8 +26,10 @@ across them.
   binary_fill_holes (pitch/roof holes) → component pruning (drop blobs detached
   from the stadium = behind-buildings) → erosion-preserved soft rim. If a
   three-capture cutout fails, ship the poster WITHOUT the hero (no medallion).
-- `static/script.js` — browser captures three 4096px images with one camera:
-  A = Mapbox Standard with 3D (landmark models), B = same without 3D,
+- `static/script.js` — hero style tabs: Graphic (mapbox/standard) or Photo
+  (mapbox/standard-satellite); the A/B/C pipeline is style-agnostic.
+  Browser captures three 4096px images with one camera:
+  A = chosen style with 3D (landmark models), B = same without 3D,
   C = stadium footprint polygons (from streets-v8 via invisible query layer)
   extruded magenta-on-black, per-feature height * 1.12.
   CRITICAL: capture zoom = preview zoom + log2(4096 / preview width) — zoom is
@@ -70,3 +73,6 @@ across them.
 - Radius slider allows 50 km with network_type='all' — cap or switch network
   type above ~15 km; label says "Zoom" but it's a radius.
 - Port custom_themes support over from maptoposter-3d if wanted.
+- Poster margin attribution: "© OpenStreetMap contributors" always; add
+  "© Mapbox © Maxar" when the Photo (satellite) hero is used. Required for
+  sold prints.

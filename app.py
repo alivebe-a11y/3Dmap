@@ -99,10 +99,16 @@ def generate():
             pitch = int(overlay_config.get('pitch', 0))
             bearing = int(overlay_config.get('bearing', 0))
             light = overlay_config.get('lightPreset', 'dusk')
+            if light not in ('dawn', 'day', 'dusk', 'night'):
+                light = 'dusk'
+            hero = overlay_config.get('hero', 'graphic')
+            if hero not in ('graphic', 'photo'):
+                hero = 'graphic'
             # v2: capture framing + mask geometry changed (preview-matched
             # zoom, per-feature volume heights) — versioning the key retires
-            # stale captures without manual cache clearing.
-            cache_base = f"overlay_v2_{lat}_{lon}_z{zoom}_p{pitch}_b{bearing}_{light}"
+            # stale captures without manual cache clearing. The hero style is
+            # part of the key so Graphic/Photo captures never cross-hit.
+            cache_base = f"overlay_v2_{lat}_{lon}_z{zoom}_p{pitch}_b{bearing}_{light}_{hero}"
             overlay_path = os.path.join(OVERLAY_CACHE_DIR, f"{cache_base}.png")
 
             if not os.path.exists(overlay_path):
